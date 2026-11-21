@@ -1,8 +1,11 @@
+require('dotenv').config();
+
 module.exports = {
-  SESSION_ID: process.env.SESSION_ID || '',
+  PORT: process.env.PORT || 3000,
   PREFIX: process.env.PREFIX || '.',
-  OWNER_NUMBER: process.env.OWNER_NUMBER || '2557XXXXXXXX', // Weka namba yako bila +
-  BOT_NAME: process.env.BOT_NAME || 'HANS TECHY BOT',
-  MODE: process.env.MODE || 'public', // 'public' au 'private'
-  PORT: process.env.PORT || 3000
+  BOT_NAME: process.env.BOT_NAME || 'HANS TECHY V2',
+  OWNER_NAME: process.env.OWNER_NAME || 'HANS TECHY',
+  OWNER_NUMBER: (process.env.OWNER_NUMBER || '255686005775').replace(/\D/g, ''),
+  SESSION_ID: (process.env.SESSION_ID || '').trim(),
+  BOT_MODE: 'PUBLIC'
 };
