@@ -11,6 +11,7 @@ const fs = require('fs-extra');
 const pino = require('pino');
 const os = require('os');
 const axios = require('axios');
+const zlib = require('zlib');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -21,13 +22,12 @@ let OWNER_NAME = process.env.OWNER_NAME || 'HANS TECHY';
 let OWNER_NUMBER = (process.env.OWNER_NUMBER || '255686005775').replace(/\D/g, '');
 let BOT_MODE = 'PUBLIC';
 
-// Zimezimwa kulinda namba dhidi ya kizuizi cha WhatsApp (Anti-Ban/Anti-Shadowban)
 let AUTO_VIEW_STATUS = false;
 let AUTO_LIKE_STATUS = false;
 let ANTILINK = false;
 let ANTISPAM = false;
 
-// Hifadhi ya ujumbe kuondoa "Waiting for this message" (DM na Group)
+// Hifadhi ya ujumbe na cache ya retry
 const messageStore = new Map();
 const msgRetryCounterCache = new Map();
 const groupCache = new Map();
@@ -372,18 +372,61 @@ app.listen(PORT, '0.0.0.0', () => {
 process.on('uncaughtException', (err) => console.log('[EXC]', err?.message || err));
 process.on('unhandledRejection', (err) => console.log('[REJ]', err?.message || err));
 
+// FUNGUA NA UWEKE PRE-KEYS ZOTE ZA SESSION
 async function setupAuth() {
   const dir = './session';
   await fs.ensureDir(dir);
   const rawSession = (process.env.SESSION_ID || '').trim();
-  if (!rawSession) return false;
+  if (!rawSession) {
+    console.error('❌ SESSION_ID haipo kwenye Heroku Config Vars!');
+    return false;
+  }
 
-  const base64 = rawSession.includes('~') ? rawSession.split('~')[1] : rawSession;
+  // Chukua payload ya mwisho hata kama kuna HANS-TECHY~v2~ au HANS-TECHY~
+  let base64Part = rawSession;
+  if (rawSession.includes('~')) {
+    const parts = rawSession.split('~');
+    base64Part = parts[parts.length - 1];
+  }
+
   try {
-    const credsJson = Buffer.from(base64.trim(), 'base64').toString('utf-8');
-    await fs.writeFile(`${dir}/creds.json`, credsJson);
+    const buffer = Buffer.from(base64Part.trim(), 'base64');
+
+    // 1. Fungua GZIP snapshot yenye funguo zote za usimbaji (HANS-TECHY v2)
+    try {
+      const unzipped = zlib.gunzipSync(buffer).toString('utf-8');
+      const payload = JSON.parse(unzipped);
+      if (payload.files && typeof payload.files === 'object') {
+        for (const [name, content] of Object.entries(payload.files)) {
+          await fs.writeFile(`${dir}/${name}`, content, 'utf-8');
+        }
+        console.log(`✅ HANS-TECHY v2: Funguo zote ${Object.keys(payload.files).length} zimehifadhiwa kikamilifu!`);
+        return true;
+      }
+    } catch (e) {
+      // Sio GZIP, endelea kama kawaida
+    }
+
+    // 2. Ikiwa ni JSON snapshot ya kawaida yenye mafaili
+    try {
+      const text = buffer.toString('utf-8');
+      const parsed = JSON.parse(text);
+      if (parsed.files && typeof parsed.files === 'object') {
+        for (const [name, content] of Object.entries(parsed.files)) {
+          await fs.writeFile(`${dir}/${name}`, content, 'utf-8');
+        }
+        console.log(`✅ JSON Snapshot: Mafaili ${Object.keys(parsed.files).length} yamehifadhiwa!`);
+        return true;
+      }
+    } catch (e) {}
+
+    // 3. Ikiwa ni creds.json pekee
+    const text = buffer.toString('utf-8');
+    await fs.writeFile(`${dir}/creds.json`, text, 'utf-8');
+    console.log('✅ creds.json imehifadhiwa.');
     return true;
-  } catch (e) {
+  } catch (err) {
+    console.error('❌ Hitilafu wakati wa kusoma SESSION_ID:', err?.message || err);
     return false;
   }
 }
@@ -587,13 +630,11 @@ async function startBot() {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, logger)
     },
-    // Ubuntu Chrome ndio standard inayokubalika zaidi na WhatsApp E2EE
     browser: Browsers.ubuntu('Chrome'),
     syncFullHistory: false,
     markOnlineOnConnect: true,
     generateHighQualityLinkPreview: false,
     cachedGroupMetadata: async (jid) => groupCache.get(jid),
-    // Hii inajibu maombi ya retry kutoka kwa simu za watu (DM na Magroup)
     msgRetryCounterCache,
     getMessage: async (key) => {
       if (messageStore.has(key.id)) {
@@ -622,7 +663,6 @@ async function startBot() {
     const msg = messages[0];
     if (!msg?.message) return;
 
-    // Hifadhi ujumbe unaoingia kwenye cache
     if (msg.key?.id) {
       messageStore.set(msg.key.id, msg.message);
       if (messageStore.size > 2000) {
@@ -633,7 +673,6 @@ async function startBot() {
 
     const from = msg.key.remoteJid;
 
-    // Auto Status View na Like
     if (from === 'status@broadcast') {
       if (AUTO_VIEW_STATUS) sock.readMessages([msg.key]).catch(() => {});
       if (AUTO_LIKE_STATUS) {
@@ -659,15 +698,12 @@ async function startBot() {
     const command = args.shift().toLowerCase();
     const q = args.join(' ');
 
-    // Utambuzi wa Owner kwenye DM na Magroup
     const sender = msg.key.participant || from;
     const senderDigits = (sender || '').replace(/\D/g, '');
     const isOwner = msg.key.fromMe || senderDigits === OWNER_NUMBER;
 
     if (BOT_MODE === 'PRIVATE' && !isOwner) return;
 
-    // SEHEMU MUHIMU: Kutuma na kuhifadhi ujumbe unaotumwa na bot
-    // Hii ndiyo inayofungua "Waiting for this message" papo hapo!
     const reply = async (txt) => {
       try {
         if (from.endsWith('@g.us')) {
