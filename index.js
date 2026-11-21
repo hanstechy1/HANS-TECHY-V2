@@ -21,15 +21,16 @@ let OWNER_NAME = process.env.OWNER_NAME || 'HANS TECHY';
 let OWNER_NUMBER = (process.env.OWNER_NUMBER || '255686005775').replace(/\D/g, '');
 let BOT_MODE = 'PUBLIC';
 
-// Tumezima hizi ili kuzuia WhatsApp isizuie namba (Anti-Ban/Anti-Shadowban)
+// Zimezimwa kulinda namba dhidi ya kizuizi cha WhatsApp (Anti-Ban/Anti-Shadowban)
 let AUTO_VIEW_STATUS = false;
 let AUTO_LIKE_STATUS = false;
 let ANTILINK = false;
 let ANTISPAM = false;
 
-// Hifadhi ya ujumbe kuondoa "Waiting for this message"
+// Hifadhi ya ujumbe kuondoa "Waiting for this message" (DM na Group)
 const messageStore = new Map();
 const msgRetryCounterCache = new Map();
+const groupCache = new Map();
 
 // API endpoint ya JSON Status
 app.get('/api/status', (req, res) => {
@@ -44,7 +45,7 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-// Dashboard ya Heroku yenye Animations za kisasa
+// Dashboard ya Heroku yenye Live Animations
 app.get('/', (req, res) => {
   const uptime = Math.floor(process.uptime());
   const ram = (process.memoryUsage().rss / (1024 * 1024)).toFixed(1);
@@ -586,11 +587,13 @@ async function startBot() {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, logger)
     },
-    browser: Browsers.macOS('Desktop'),
+    // Ubuntu Chrome ndio standard inayokubalika zaidi na WhatsApp E2EE
+    browser: Browsers.ubuntu('Chrome'),
     syncFullHistory: false,
     markOnlineOnConnect: true,
     generateHighQualityLinkPreview: false,
-    // Huondoa na kurekebisha "Waiting for this message"
+    cachedGroupMetadata: async (jid) => groupCache.get(jid),
+    // Hii inajibu maombi ya retry kutoka kwa simu za watu (DM na Magroup)
     msgRetryCounterCache,
     getMessage: async (key) => {
       if (messageStore.has(key.id)) {
@@ -619,10 +622,10 @@ async function startBot() {
     const msg = messages[0];
     if (!msg?.message) return;
 
-    // Hifadhi ujumbe kwenye cache kwa ajili ya retry
+    // Hifadhi ujumbe unaoingia kwenye cache
     if (msg.key?.id) {
       messageStore.set(msg.key.id, msg.message);
-      if (messageStore.size > 1500) {
+      if (messageStore.size > 2000) {
         const firstKey = messageStore.keys().next().value;
         messageStore.delete(firstKey);
       }
@@ -656,15 +659,33 @@ async function startBot() {
     const command = args.shift().toLowerCase();
     const q = args.join(' ');
 
-    // Utambuzi thabiti wa Owner kwenye DM na Magroup
+    // Utambuzi wa Owner kwenye DM na Magroup
     const sender = msg.key.participant || from;
     const senderDigits = (sender || '').replace(/\D/g, '');
     const isOwner = msg.key.fromMe || senderDigits === OWNER_NUMBER;
 
     if (BOT_MODE === 'PRIVATE' && !isOwner) return;
 
-    // Kutuma moja kwa moja bila { quoted: msg } ili ujumbe ufike kwa kila mtu bila kukwama
-    const reply = (txt) => sock.sendMessage(from, { text: txt });
+    // SEHEMU MUHIMU: Kutuma na kuhifadhi ujumbe unaotumwa na bot
+    // Hii ndiyo inayofungua "Waiting for this message" papo hapo!
+    const reply = async (txt) => {
+      try {
+        if (from.endsWith('@g.us')) {
+          sock.groupMetadata(from).then(m => groupCache.set(from, m)).catch(() => {});
+        }
+        const sent = await sock.sendMessage(from, { text: txt });
+        if (sent?.key?.id && sent?.message) {
+          messageStore.set(sent.key.id, sent.message);
+          if (messageStore.size > 2000) {
+            const firstKey = messageStore.keys().next().value;
+            messageStore.delete(firstKey);
+          }
+        }
+        return sent;
+      } catch (err) {
+        console.log('Error sending reply:', err?.message || err);
+      }
+    };
 
     // ==========================================
     // ALL 130+ COMMAND HANDLERS
