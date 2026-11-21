@@ -13,7 +13,7 @@ const pino = require('pino');
 const os = require('os');
 const axios = require('axios');
 
-// Lightweight web server to satisfy Heroku's web port requirement
+// Web server for Heroku port binding
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -22,18 +22,17 @@ app.get('/', (req, res) => {
     status: 'online',
     bot: process.env.BOT_NAME || 'HANS TECHY V2',
     owner: process.env.OWNER_NAME || 'HANS TECHY',
-    uptime: `${Math.floor(process.uptime())} seconds`,
-    message: 'Bot is active and running 24/7 🚀'
+    uptime: `${Math.floor(process.uptime())}s`,
+    message: 'HANS TECHY V2 is active and running 24/7 🚀'
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`🌐 Web server listening on port ${PORT}`);
+  console.log(`🌐 Server running on port ${PORT}`);
 });
 
-// Crash prevention guards
-process.on('uncaughtException', (err) => console.log('[ERROR] Uncaught exception:', err?.message || err));
-process.on('unhandledRejection', (reason) => console.log('[ERROR] Unhandled rejection:', reason?.message || reason));
+process.on('uncaughtException', (err) => console.log('[ERROR]', err?.message || err));
+process.on('unhandledRejection', (reason) => console.log('[REJECTION]', reason?.message || reason));
 
 let PREFIX = process.env.PREFIX || '.';
 let BOT_NAME = process.env.BOT_NAME || 'HANS TECHY V2';
@@ -50,19 +49,18 @@ async function setupAuth() {
   await fs.ensureDir(dir);
 
   if (!rawSession) {
-    console.error('⚠️ WARNING: SESSION_ID is missing in Heroku Config Vars!');
+    console.error('⚠️ SESSION_ID is missing in Config Vars!');
     return false;
   }
 
-  // Strip prefix "HANS TECHY~" if present
   const base64 = rawSession.includes('~') ? rawSession.split('~')[1] : rawSession;
   try {
     const creds = Buffer.from(base64.trim(), 'base64').toString('utf-8');
     await fs.writeFile(`${dir}/creds.json`, creds);
-    console.log('✅ Session ID decoded and loaded successfully!');
+    console.log('✅ Session loaded successfully!');
     return true;
   } catch (err) {
-    console.error('❌ Failed to decode SESSION_ID:', err.message);
+    console.error('❌ Error decoding SESSION_ID:', err.message);
     return false;
   }
 }
@@ -102,7 +100,7 @@ ${PREFIX}groupinfo
 ╭━━━〔 🛠️ *UTILITY TOOLS* 〕━━━╮
 ${PREFIX}ping
 ${PREFIX}alive
-${PREFIX}calc <math expression>
+${PREFIX}calc <math>
 ${PREFIX}quote
 ${PREFIX}joke
 
@@ -115,21 +113,17 @@ _HANS TECHY V2 — All rights reserved_`;
 
 async function startBot() {
   const isAuthReady = await setupAuth();
-  if (!isAuthReady) {
-    console.log('Waiting for valid SESSION_ID in Heroku Config Vars...');
-    return;
-  }
+  if (!isAuthReady) return;
 
   const sessionDir = './session';
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
 
-  // Safe fallback version in case GitHub releases network check fails
   let version = [2, 3000, 1015901307];
   try {
     const v = await fetchLatestBaileysVersion();
     if (v?.version) version = v.version;
   } catch (e) {
-    console.log('Using cached Baileys version...');
+    console.log('Using default Baileys version...');
   }
 
   const logger = pino({ level: 'silent' });
@@ -153,17 +147,17 @@ async function startBot() {
     if (connection === 'close') {
       const code = lastDisconnect?.error?.output?.statusCode;
       if (code !== DisconnectReason.loggedOut) {
-        console.log('Connection interrupted, reconnecting...');
+        console.log('Reconnecting bot...');
         setTimeout(startBot, 5000);
       } else {
-        console.log('❌ Device was logged out from WhatsApp.');
+        console.log('❌ Logged out from WhatsApp.');
       }
     } else if (connection === 'open') {
-      console.log(`🚀 ${BOT_NAME} IS ONLINE AND READY!`);
+      console.log(`🚀 ${BOT_NAME} IS CONNECTED AND ONLINE!`);
     }
   });
 
-  // Handle auto-status and incoming commands
+  // Listener ya meseji na command zote
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
     const msg = messages[0];
@@ -171,7 +165,7 @@ async function startBot() {
 
     const from = msg.key.remoteJid;
 
-    // Automatic status view & like
+    // Auto Status View na Like
     if (from === 'status@broadcast') {
       if (AUTO_VIEW_STATUS) await sock.readMessages([msg.key]);
       if (AUTO_LIKE_STATUS) {
@@ -184,22 +178,29 @@ async function startBot() {
       return;
     }
 
-    const isOwner = msg.key.fromMe || (from && from.includes(OWNER_NUMBER));
-    if (BOT_MODE === 'PRIVATE' && !isOwner) return;
+    const messageContent =
+      msg.message?.ephemeralMessage?.message ||
+      msg.message?.viewOnceMessage?.message ||
+      msg.message;
 
     const body =
-      msg.message.conversation ||
-      msg.message.extendedTextMessage?.text ||
-      msg.message.imageMessage?.caption ||
+      messageContent?.conversation ||
+      messageContent?.extendedTextMessage?.text ||
+      messageContent?.imageMessage?.caption ||
+      messageContent?.videoMessage?.caption ||
       '';
 
-    if (!body.startsWith(PREFIX)) return;
+    const trimmed = body.trim();
+    if (!trimmed.startsWith(PREFIX)) return;
 
-    const args = body.slice(PREFIX.length).trim().split(/ +/);
+    const args = trimmed.slice(PREFIX.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();
     const text = args.join(' ');
 
-    console.log(`[COMMAND] ${command} from ${from}`);
+    console.log(`[COMMAND RECEIVED] ${command} from ${from}`);
+
+    const isOwner = msg.key.fromMe || (from && from.includes(OWNER_NUMBER));
+    if (BOT_MODE === 'PRIVATE' && !isOwner) return;
 
     switch (command) {
       case 'menu':
@@ -209,90 +210,42 @@ async function startBot() {
 
       case 'ping': {
         const start = Date.now();
-        await sock.sendMessage(from, { text: 'Testing response speed... ⚡' }, { quoted: msg });
+        await sock.sendMessage(from, { text: 'Testing speed... ⚡' }, { quoted: msg });
         await sock.sendMessage(from, { text: `🚀 *Pong:* ${Date.now() - start}ms` }, { quoted: msg });
         break;
       }
 
       case 'alive': {
-        const uptime = Math.floor(process.uptime());
-        const h = Math.floor(uptime / 3600);
-        const m = Math.floor((uptime % 3600) / 60);
-        const s = uptime % 60;
+        const up = Math.floor(process.uptime());
         await sock.sendMessage(from, {
-          text: `🌟 *${BOT_NAME} IS ONLINE!*\n\n⏱️ *Uptime:* ${h}h ${m}m ${s}s\n🧠 *RAM:* ${getRamUsage()}\n⚙️ *Mode:* ${BOT_MODE}\n👑 *Owner:* ${OWNER_NAME}`
+          text: `🌟 *${BOT_NAME} IS ONLINE!*\n\n⏱️ *Uptime:* ${Math.floor(up / 60)} minutes\n🧠 *RAM:* ${getRamUsage()}\n👑 *Owner:* ${OWNER_NAME}`
         }, { quoted: msg });
         break;
       }
 
       case 'owner':
-      case 'ownerinfo':
-        await sock.sendMessage(from, {
-          text: `👑 *Owner:* ${OWNER_NAME}\n📱 *WhatsApp:* wa.me/${OWNER_NUMBER}`
-        }, { quoted: msg });
-        break;
-
-      case 'mode':
-        if (!isOwner) return sock.sendMessage(from, { text: '⚠️ This command is restricted to the bot owner!' }, { quoted: msg });
-        if (text.toLowerCase() === 'private') {
-          BOT_MODE = 'PRIVATE';
-          await sock.sendMessage(from, { text: '🔒 Bot mode set to *PRIVATE*.' }, { quoted: msg });
-        } else if (text.toLowerCase() === 'public') {
-          BOT_MODE = 'PUBLIC';
-          await sock.sendMessage(from, { text: '🔓 Bot mode set to *PUBLIC*.' }, { quoted: msg });
-        } else {
-          await sock.sendMessage(from, { text: `Usage: ${PREFIX}mode public OR ${PREFIX}mode private` }, { quoted: msg });
-        }
-        break;
-
-      case 'autolikestatus':
-        if (!isOwner) return sock.sendMessage(from, { text: '⚠️ This command is restricted to the bot owner!' }, { quoted: msg });
-        AUTO_LIKE_STATUS = text.toLowerCase() === 'on';
-        await sock.sendMessage(from, { text: `❤️ Auto Like Status: *${AUTO_LIKE_STATUS ? 'ON' : 'OFF'}*` }, { quoted: msg });
-        break;
-
-      case 'autoviewstatus':
-        if (!isOwner) return sock.sendMessage(from, { text: '⚠️ This command is restricted to the bot owner!' }, { quoted: msg });
-        AUTO_VIEW_STATUS = text.toLowerCase() === 'on';
-        await sock.sendMessage(from, { text: `👁️ Auto View Status: *${AUTO_VIEW_STATUS ? 'ON' : 'OFF'}*` }, { quoted: msg });
+        await sock.sendMessage(from, { text: `👑 *Owner:* ${OWNER_NAME}\n📱 *WhatsApp:* wa.me/${OWNER_NUMBER}` }, { quoted: msg });
         break;
 
       case 'tagall': {
         if (!from.endsWith('@g.us')) return sock.sendMessage(from, { text: '⚠️ Group only command!' }, { quoted: msg });
         const metadata = await sock.groupMetadata(from);
         let tagMsg = `📢 *ATTENTION ALL MEMBERS*\n💬 ${text || 'Notice from Admin'}\n\n`;
-        const mentions = metadata.participants.map((p) => p.id);
-        mentions.forEach((m) => tagMsg += `@${m.split('@')[0]}\n`);
+        const mentions = metadata.participants.map(p => p.id);
+        mentions.forEach(m => tagMsg += `@${m.split('@')[0]}\n`);
         await sock.sendMessage(from, { text: tagMsg, mentions }, { quoted: msg });
-        break;
-      }
-
-      case 'hidetag': {
-        if (!from.endsWith('@g.us')) return sock.sendMessage(from, { text: '⚠️ Group only command!' }, { quoted: msg });
-        const metadata = await sock.groupMetadata(from);
-        const mentions = metadata.participants.map((p) => p.id);
-        await sock.sendMessage(from, { text: text || '📢 Attention!', mentions });
         break;
       }
 
       case 'calc':
       case 'math':
-        if (!text) return sock.sendMessage(from, { text: `Please provide a math expression! Example: ${PREFIX}calc 25 * 4 + 10` }, { quoted: msg });
+        if (!text) return sock.sendMessage(from, { text: `Example: ${PREFIX}calc 25 * 4 + 10` }, { quoted: msg });
         try {
           const sanitized = text.replace(/[^0-9+\-*/().]/g, '');
           const result = Function(`'use strict'; return (${sanitized})`)();
           await sock.sendMessage(from, { text: `🧮 *Result:* ${result}` }, { quoted: msg });
         } catch {
-          await sock.sendMessage(from, { text: '❌ Invalid math expression.' }, { quoted: msg });
-        }
-        break;
-
-      case 'quote':
-        try {
-          const res = await axios.get('https://api.quotable.io/random');
-          await sock.sendMessage(from, { text: `📜 "${res.data.content}"\n— *${res.data.author}*` }, { quoted: msg });
-        } catch {
-          await sock.sendMessage(from, { text: '📜 "Discipline is the bridge between goals and accomplishment."' }, { quoted: msg });
+          await sock.sendMessage(from, { text: '❌ Invalid expression.' }, { quoted: msg });
         }
         break;
 
@@ -303,8 +256,8 @@ async function startBot() {
       case 'ai':
       case 'gpt':
       case 'ask':
-        if (!text) return sock.sendMessage(from, { text: `Please provide a prompt! Example: ${PREFIX}ai write a short poem about coding` }, { quoted: msg });
-        await sock.sendMessage(from, { text: `🤖 *HANS TECHY AI:*\n\nReceived your prompt: "${text}".` }, { quoted: msg });
+        if (!text) return sock.sendMessage(from, { text: `Example: ${PREFIX}ai write a poem` }, { quoted: msg });
+        await sock.sendMessage(from, { text: `🤖 *HANS TECHY AI:*\n\nYour question: "${text}".` }, { quoted: msg });
         break;
 
       default:
