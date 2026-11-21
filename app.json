@@ -6,7 +6,7 @@
   "keywords": ["whatsapp", "bot", "baileys", "hans-techy", "multi-device"],
   "env": {
     "SESSION_ID": {
-      "description": "Your Session ID generated from https://generatepaircode.lovable.app",
+      "description": "Your Session ID generated from Pair Code",
       "required": true
     },
     "OWNER_NAME": {
