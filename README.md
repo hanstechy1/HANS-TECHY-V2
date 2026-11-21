@@ -37,7 +37,7 @@ Before deploying the bot, generate your official Session ID from the HANS TECHY 
   </a>
 </p>
 
-> 🔗 **Session Portal:** [https://generatepaircode.lovable.app/](https://generatepaircode.lovable.app/)  
+> 🔗 **Session Portal:** [PAIR CODE OR QR COR](https://generatepaircode.lovable.app/)  
 > Enter your WhatsApp phone number with country code, enter the 8-digit Pair Code on your phone (or scan the QR code). Once connected, your Session ID starting with **`HANS TECHY~...`** will be sent directly to your WhatsApp DM. **Copy that Session ID.**
 
 ---
@@ -51,7 +51,6 @@ Click the official deploy button below to deploy your bot directly to Heroku in 
   </a>
 </p>
 
-*(Note: Replace `peter-shirima` with your own GitHub username if your repository has a different URL).*
 
 ---
 
@@ -93,5 +92,5 @@ If you need assistance, encounter any issues, or want to suggest new features:
 ---
 
 <p align="center">
-  <b>Built with ❤️ by <a href="https://github.com/peter-shirima">HANS TECHY</a></b>
+  <b>Built with ❤️ by <a href="https://github.com/hanstechy1">HANS TECHY V2</a></b>
 </p>
