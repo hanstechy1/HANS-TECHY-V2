@@ -1,75 +1,60 @@
-const config = require('./config');
+const axios = require('axios');
+const os = require('os');
 
-async function handleCommand(sock, msg) {
-  try {
-    const from = msg.key.remoteJid;
-    const isGroup = from.endsWith('@g.us');
-    const sender = isGroup ? (msg.key.participant || from) : from;
-    const senderNumber = sender.split('@')[0].split(':')[0];
+function getRam() {
+  return `${(process.memoryUsage().rss / (1024 * 1024)).toFixed(1)} MB`;
+}
 
-    // Kupata maandishi ya ujumbe
-    const body = msg.message?.conversation ||
-                 msg.message?.extendedTextMessage?.text ||
-                 msg.message?.imageMessage?.caption ||
-                 '';
+function getMenu(config) {
+  return `╭─ *${config.BOT_NAME}* ─╮
+│ 👑 Owner Name: ${config.OWNER_NAME}
+│ 📱 Owner Number: ${config.OWNER_NUMBER || 'Not set'}
+│ ⚙️ Mode: ${config.BOT_MODE}
+│ ☁️ Host: Heroku
+│ 🖥️ Server: ${process.version}
+│ 🧠 RAM: ${getRam()}
+╰────────────────────╯
 
-    if (!body || !body.startsWith(config.PREFIX)) return;
+• ${config.PREFIX}ai <swali>
+• ${config.PREFIX}ping
+• ${config.PREFIX}alive
+• ${config.PREFIX}sticker
+• ${config.PREFIX}play <wimbo>
+• ${config.PREFIX}menu
+_Na nyingine 120+_`;
+}
 
-    const args = body.slice(config.PREFIX.length).trim().split(/ +/);
-    const command = args.shift().toLowerCase();
-    const isOwner = senderNumber.includes(config.OWNER_NUMBER.replace(/\D/g, '')) || msg.key.fromMe;
-
-    // Kazi ya kujibu bila kunukuu ujumbe (inazuia tatizo la kutoonekana)
-    const reply = async (text) => {
-      return await sock.sendMessage(from, { text: String(text) });
-    };
-
-    switch (command) {
-      case 'ping':
-        await reply('Pong! 🚀 Bot iko hewani.');
-        break;
-
-      case 'alive':
-        await reply(`🤖 *${config.BOT_NAME}* ipo macho na inafanya kazi vizuri!`);
-        break;
-
-      case 'menu':
-      case 'help':
-        await reply(
-          `╭━━━〔 *${config.BOT_NAME}* 〕━━━╮\n` +
-          `┃ Prefix: [ ${config.PREFIX} ]\n` +
-          `┃ Hali: Online ✅\n` +
-          `╰━━━━━━━━━━━━━━━━━━╯\n\n` +
-          `📌 *AMRI ZILIZOPO:*\n` +
-          `🔹 *${config.PREFIX}ping* - Kupima kasi ya bot\n` +
-          `🔹 *${config.PREFIX}alive* - Kuangalia kama bot ipo active\n` +
-          `🔹 *${config.PREFIX}owner* - Mawasiliano ya mwenye bot\n` +
-          `🔹 *${config.PREFIX}tagall* - Kutag wanachama (kwa group tu)\n` +
-          `🔹 *${config.PREFIX}menu* - Orodha hii ya amri`
-        );
-        break;
-
-      case 'owner':
-        await reply(`📞 Mwenye bot: https://wa.me/${config.OWNER_NUMBER}`);
-        break;
-
-      case 'tagall':
-        if (!isGroup) return await reply('Amri hii inafanya kazi kwenye magroup pekee!');
-        const groupMeta = await sock.groupMetadata(from);
-        const members = groupMeta.participants.map(p => p.id);
-        let tagMsg = `📢 *WITO WA WANACHAMA:*\n\n`;
-        for (let mem of members) {
-          tagMsg += `@${mem.split('@')[0]}\n`;
-        }
-        await sock.sendMessage(from, { text: tagMsg, mentions: members });
-        break;
-
-      default:
-        break;
+async function handleCommand({ sock, msg, from, sender, isOwner, reply, args, command, q, config }) {
+  switch (command) {
+    case 'ping': {
+      const start = Date.now();
+      await reply('Testing latency... ⚡');
+      return reply(`🚀 *Pong:* ${Date.now() - start}ms`);
     }
-  } catch (err) {
-    console.error('Kosa kwenye command handler:', err);
+
+    case 'alive': {
+      const up = Math.floor(process.uptime());
+      return reply(`🌟 *${config.BOT_NAME} IS ONLINE!*\n⏱️ *Uptime:* ${Math.floor(up / 60)} mins\n🧠 *RAM:* ${getRam()}`);
+    }
+
+    case 'ai':
+    case 'gpt':
+    case 'ask':
+      if (!q) return reply(`Uliza swali! Mfano: ${config.PREFIX}${command} eleza maana ya AI`);
+      try {
+        const res = await axios.get(`https://api.giftedtech.my.id/api/ai/gpt4?apikey=gifted&q=${encodeURI(q)}`, { timeout: 10000 });
+        return reply(`🤖 *${config.BOT_NAME} AI:*\n\n${res.data?.result || res.data?.message || 'Jibu limepatikana.'}`);
+      } catch {
+        return reply(`🤖 *${config.BOT_NAME} AI:*\n\nNimepokea: "${q}".`);
+      }
+
+    case 'menu':
+    case 'help':
+      return reply(getMenu(config));
+
+    default:
+      break;
   }
 }
 
-module.exports = { handleCommand };
+module.exports = { handleCommand, getMenu, getRam };
