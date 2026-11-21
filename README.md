@@ -46,7 +46,7 @@ Before deploying the bot, generate your official Session ID from the HANS TECHY 
 Click the official deploy button below to deploy your bot directly to Heroku in one click:
 
 <p align="center">
-  <a href="https://dashboard.heroku.com/new?template=https://github.com/peter-shirima/hans-techy-v2">
+  <a href="https://dashboard.heroku.com/new?template=https://github.com/hanstechy1/hans-techy-v2">
     <img src="https://www.herokucdn.com/deploy/button.svg" alt="Deploy to Heroku" height="45"/>
   </a>
 </p>
