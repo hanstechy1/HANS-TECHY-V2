@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/peter-shirima/hans-techy-v2/stargazers"><img src="https://img.shields.io/github/stars/peter-shirima/hans-techy-v2?style=for-the-badge&color=gold" alt="Stars"></a>
+  <a href="https://github.com/hasntechy1/hans-techy-v2/stargazers"><img src="https://img.shields.io/github/stars/hanstechy1/hans-techy-v2?style=for-the-badge&color=gold" alt="Stars"></a>
   <a href="https://github.com/peter-shirima/hans-techy-v2/network/members"><img src="https://img.shields.io/github/forks/peter-shirima/hans-techy-v2?style=for-the-badge&color=orange" alt="Forks"></a>
   <a href="https://github.com/peter-shirima/hans-techy-v2/watchers"><img src="https://img.shields.io/github/watchers/peter-shirima/hans-techy-v2?style=for-the-badge&color=blue" alt="Watchers"></a>
 </p>
