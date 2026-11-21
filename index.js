@@ -10,123 +10,76 @@ const {
 } = require('@whiskeysockets/baileys');
 const fs = require('fs-extra');
 const pino = require('pino');
-const os = require('os');
-const axios = require('axios');
 
-// Web server for Heroku port binding
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+let waStatus = 'INITIALIZING';
+let waError = null;
+
+// Ukifungua link ya Heroku itaonyesha hali halisi ya WhatsApp
 app.get('/', (req, res) => {
   res.json({
-    status: 'online',
-    bot: process.env.BOT_NAME || 'HANS TECHY V2',
-    owner: process.env.OWNER_NAME || 'HANS TECHY',
-    uptime: `${Math.floor(process.uptime())}s`,
-    message: 'HANS TECHY V2 is active and running 24/7 🚀'
+    web_server: 'ONLINE',
+    whatsapp_connection: waStatus,
+    error_message: waError,
+    bot_name: process.env.BOT_NAME || 'HANS TECHY V2',
+    owner: process.env.OWNER_NUMBER || '255686005775'
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`🌐 Server running on port ${PORT}`);
+  console.log(`🌐 Server listening on port ${PORT}`);
 });
 
-process.on('uncaughtException', (err) => console.log('[ERROR]', err?.message || err));
-process.on('unhandledRejection', (reason) => console.log('[REJECTION]', reason?.message || reason));
+process.on('uncaughtException', (err) => console.log('[EXCEPTION]', err?.message || err));
+process.on('unhandledRejection', (err) => console.log('[REJECTION]', err?.message || err));
 
-let PREFIX = process.env.PREFIX || '.';
-let BOT_NAME = process.env.BOT_NAME || 'HANS TECHY V2';
-let OWNER_NAME = process.env.OWNER_NAME || 'HANS TECHY';
-let OWNER_NUMBER = process.env.OWNER_NUMBER || '255686005775';
-let BOT_MODE = 'PUBLIC';
-let AUTO_VIEW_STATUS = true;
-let AUTO_LIKE_STATUS = true;
-
-const rawSession = process.env.SESSION_ID || '';
+const PREFIX = process.env.PREFIX || '.';
+const BOT_NAME = process.env.BOT_NAME || 'HANS TECHY V2';
+const OWNER_NUMBER = (process.env.OWNER_NUMBER || '255686005775').replace(/\D/g, '');
 
 async function setupAuth() {
   const dir = './session';
   await fs.ensureDir(dir);
 
+  const rawSession = (process.env.SESSION_ID || '').trim();
   if (!rawSession) {
-    console.error('⚠️ SESSION_ID is missing in Config Vars!');
+    waStatus = 'MISSING_SESSION_ID';
+    waError = 'Weka SESSION_ID kwenye Heroku Settings -> Reveal Config Vars!';
+    console.error('❌ ' + waError);
     return false;
   }
 
+  // Toa HANS TECHY~ mbele kama ipo
   const base64 = rawSession.includes('~') ? rawSession.split('~')[1] : rawSession;
   try {
-    const creds = Buffer.from(base64.trim(), 'base64').toString('utf-8');
-    await fs.writeFile(`${dir}/creds.json`, creds);
-    console.log('✅ Session loaded successfully!');
+    const credsJson = Buffer.from(base64.trim(), 'base64').toString('utf-8');
+    await fs.writeFile(`${dir}/creds.json`, credsJson);
+    console.log('✅ Session creds.json imeundwa kikamilifu!');
     return true;
-  } catch (err) {
-    console.error('❌ Error decoding SESSION_ID:', err.message);
+  } catch (e) {
+    waStatus = 'INVALID_SESSION_ID';
+    waError = 'Session ID haisomeki: ' + e.message;
+    console.error('❌ ' + waError);
     return false;
   }
-}
-
-function getRamUsage() {
-  return `${(process.memoryUsage().rss / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function generateMenu() {
-  return `╭─ *${BOT_NAME}* ─╮
-│ 👑 Owner Name: ${OWNER_NAME}
-│ 📱 Owner Number: ${OWNER_NUMBER}
-│ ⚙️ Mode: ${BOT_MODE}
-│ ☁️ Host: Heroku
-│ 🖥️ Server: ${process.version}
-│ 🧠 RAM: ${getRamUsage()}
-│ 💾 Storage: Active
-╰────────────────────╯
-
-╭━━━〔 🤖 *AI COMMANDS* 〕━━━╮
-${PREFIX}ai <query>
-${PREFIX}gpt <query>
-${PREFIX}ask <query>
-${PREFIX}chat <text>
-${PREFIX}translate <text>
-${PREFIX}summarize <text>
-
-╭━━━〔 ❤️ *STATUS COMMANDS* 〕━━━╮
-${PREFIX}autolikestatus on/off
-${PREFIX}autoviewstatus on/off
-
-╭━━━〔 👥 *GROUP COMMANDS* 〕━━━╮
-${PREFIX}tagall
-${PREFIX}hidetag
-${PREFIX}groupinfo
-
-╭━━━〔 🛠️ *UTILITY TOOLS* 〕━━━╮
-${PREFIX}ping
-${PREFIX}alive
-${PREFIX}calc <math>
-${PREFIX}quote
-${PREFIX}joke
-
-╭━━━〔 👑 *OWNER COMMANDS* 〕━━━╮
-${PREFIX}mode private/public
-${PREFIX}owner
-
-_HANS TECHY V2 — All rights reserved_`;
 }
 
 async function startBot() {
-  const isAuthReady = await setupAuth();
-  if (!isAuthReady) return;
+  const ready = await setupAuth();
+  if (!ready) return;
 
-  const sessionDir = './session';
-  const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+  waStatus = 'CONNECTING_TO_WHATSAPP...';
+  const { state, saveCreds } = await useMultiFileAuthState('./session');
 
   let version = [2, 3000, 1015901307];
   try {
     const v = await fetchLatestBaileysVersion();
     if (v?.version) version = v.version;
-  } catch (e) {
-    console.log('Using default Baileys version...');
-  }
+  } catch {}
 
-  const logger = pino({ level: 'silent' });
+  const logger = pino({ level: 'info' });
 
   const sock = makeWASocket({
     version,
@@ -137,134 +90,117 @@ async function startBot() {
       keys: makeCacheableSignalKeyStore(state.keys, logger)
     },
     browser: Browsers.macOS('Desktop'),
-    syncFullHistory: false
+    syncFullHistory: false,
+    markOnlineOnConnect: true
   });
 
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect } = update;
+
     if (connection === 'close') {
-      const code = lastDisconnect?.error?.output?.statusCode;
-      if (code !== DisconnectReason.loggedOut) {
-        console.log('Reconnecting bot...');
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      waStatus = `DISCONNECTED (Code: ${statusCode || 'unknown'})`;
+      waError = lastDisconnect?.error?.message || null;
+      console.log(`❌ Muunganisho umefungwa. Code: ${statusCode}`);
+
+      if (statusCode !== DisconnectReason.loggedOut) {
+        console.log('🔄 Inaunganisha tena baada ya sekunde 5...');
         setTimeout(startBot, 5000);
       } else {
-        console.log('❌ Logged out from WhatsApp.');
+        waStatus = 'LOGGED_OUT';
+        waError = 'Umeondolewa kwenye WhatsApp. Tengeneza Session ID mpya!';
       }
     } else if (connection === 'open') {
-      console.log(`🚀 ${BOT_NAME} IS CONNECTED AND ONLINE!`);
+      waStatus = 'CONNECTED';
+      waError = null;
+      console.log(`🎉 ${BOT_NAME} IMEUNGANISHWA NA IKO ONLINE TAYARI!`);
     }
   });
 
-  // Listener ya meseji na command zote
+  // KUSIKILIZA NA KUJIBU MESEJI
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
-    const msg = messages[0];
-    if (!msg?.message) return;
+    try {
+      if (type !== 'notify') return;
+      const msg = messages[0];
+      if (!msg?.message) return;
 
-    const from = msg.key.remoteJid;
+      const from = msg.key.remoteJid;
 
-    // Auto Status View na Like
-    if (from === 'status@broadcast') {
-      if (AUTO_VIEW_STATUS) await sock.readMessages([msg.key]);
-      if (AUTO_LIKE_STATUS) {
+      // Kusoma Status
+      if (from === 'status@broadcast') {
+        await sock.readMessages([msg.key]);
         try {
           await sock.sendMessage('status@broadcast', {
             react: { text: '💚', key: msg.key }
           }, { statusJidList: [msg.key.participant] });
         } catch {}
+        return;
       }
-      return;
-    }
 
-    const messageContent =
-      msg.message?.ephemeralMessage?.message ||
-      msg.message?.viewOnceMessage?.message ||
-      msg.message;
+      // Kupata ujumbe kamili
+      const content = msg.message?.ephemeralMessage?.message || msg.message;
+      const text =
+        content?.conversation ||
+        content?.extendedTextMessage?.text ||
+        content?.imageMessage?.caption ||
+        '';
 
-    const body =
-      messageContent?.conversation ||
-      messageContent?.extendedTextMessage?.text ||
-      messageContent?.imageMessage?.caption ||
-      messageContent?.videoMessage?.caption ||
-      '';
+      const body = text.trim();
+      if (!body.startsWith(PREFIX)) return;
 
-    const trimmed = body.trim();
-    if (!trimmed.startsWith(PREFIX)) return;
+      const args = body.slice(PREFIX.length).trim().split(/ +/);
+      const command = args.shift().toLowerCase();
+      const q = args.join(' ');
 
-    const args = trimmed.slice(PREFIX.length).trim().split(/ +/);
-    const command = args.shift().toLowerCase();
-    const text = args.join(' ');
+      console.log(`⚡ Command imepokelewa: ${command} kutoka ${from}`);
 
-    console.log(`[COMMAND RECEIVED] ${command} from ${from}`);
-
-    const isOwner = msg.key.fromMe || (from && from.includes(OWNER_NUMBER));
-    if (BOT_MODE === 'PRIVATE' && !isOwner) return;
-
-    switch (command) {
-      case 'menu':
-      case 'help':
-        await sock.sendMessage(from, { text: generateMenu() }, { quoted: msg });
-        break;
-
-      case 'ping': {
+      // Amri ya PING
+      if (command === 'ping') {
         const start = Date.now();
-        await sock.sendMessage(from, { text: 'Testing speed... ⚡' }, { quoted: msg });
-        await sock.sendMessage(from, { text: `🚀 *Pong:* ${Date.now() - start}ms` }, { quoted: msg });
-        break;
+        await sock.sendMessage(from, { text: `🚀 *Pong!* Kasi: ${Date.now() - start}ms` });
+        return;
       }
 
-      case 'alive': {
-        const up = Math.floor(process.uptime());
+      // Amri ya MENU
+      if (command === 'menu' || command === 'help') {
+        const menu = `╭─ *${BOT_NAME}* ─╮
+│ 👑 Owner: ${OWNER_NUMBER}
+│ ⚡ Prefix: [ ${PREFIX} ]
+│ 🕒 Status: Online ✅
+╰────────────────────╯
+
+╭───「 *COMMANDS* 」
+│ 🔹 *${PREFIX}ping* - Pima kasi
+│ 🔹 *${PREFIX}alive* - Kuangalia bot
+│ 🔹 *${PREFIX}menu* - Orodha ya amri
+│ 🔹 *${PREFIX}owner* - Mawasiliano
+╰────────────────────◆`;
+        await sock.sendMessage(from, { text: menu });
+        return;
+      }
+
+      // Amri ya ALIVE
+      if (command === 'alive') {
         await sock.sendMessage(from, {
-          text: `🌟 *${BOT_NAME} IS ONLINE!*\n\n⏱️ *Uptime:* ${Math.floor(up / 60)} minutes\n🧠 *RAM:* ${getRamUsage()}\n👑 *Owner:* ${OWNER_NAME}`
-        }, { quoted: msg });
-        break;
+          text: `👋 *${BOT_NAME}* iko macho na inafanya kazi vizuri!`
+        });
+        return;
       }
 
-      case 'owner':
-        await sock.sendMessage(from, { text: `👑 *Owner:* ${OWNER_NAME}\n📱 *WhatsApp:* wa.me/${OWNER_NUMBER}` }, { quoted: msg });
-        break;
-
-      case 'tagall': {
-        if (!from.endsWith('@g.us')) return sock.sendMessage(from, { text: '⚠️ Group only command!' }, { quoted: msg });
-        const metadata = await sock.groupMetadata(from);
-        let tagMsg = `📢 *ATTENTION ALL MEMBERS*\n💬 ${text || 'Notice from Admin'}\n\n`;
-        const mentions = metadata.participants.map(p => p.id);
-        mentions.forEach(m => tagMsg += `@${m.split('@')[0]}\n`);
-        await sock.sendMessage(from, { text: tagMsg, mentions }, { quoted: msg });
-        break;
+      // Amri ya OWNER
+      if (command === 'owner') {
+        await sock.sendMessage(from, {
+          text: `👑 *Owner:* wa.me/${OWNER_NUMBER}`
+        });
+        return;
       }
 
-      case 'calc':
-      case 'math':
-        if (!text) return sock.sendMessage(from, { text: `Example: ${PREFIX}calc 25 * 4 + 10` }, { quoted: msg });
-        try {
-          const sanitized = text.replace(/[^0-9+\-*/().]/g, '');
-          const result = Function(`'use strict'; return (${sanitized})`)();
-          await sock.sendMessage(from, { text: `🧮 *Result:* ${result}` }, { quoted: msg });
-        } catch {
-          await sock.sendMessage(from, { text: '❌ Invalid expression.' }, { quoted: msg });
-        }
-        break;
-
-      case 'joke':
-        await sock.sendMessage(from, { text: '😂 Why do programmers prefer dark mode? Because light attracts bugs!' }, { quoted: msg });
-        break;
-
-      case 'ai':
-      case 'gpt':
-      case 'ask':
-        if (!text) return sock.sendMessage(from, { text: `Example: ${PREFIX}ai write a poem` }, { quoted: msg });
-        await sock.sendMessage(from, { text: `🤖 *HANS TECHY AI:*\n\nYour question: "${text}".` }, { quoted: msg });
-        break;
-
-      default:
-        break;
+    } catch (err) {
+      console.error('Hitilafu wakati wa kujibu:', err);
     }
   });
 }
 
 startBot();
-
