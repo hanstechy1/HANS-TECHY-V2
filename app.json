@@ -1,0 +1,39 @@
+{
+  "name": "HANS TECHY V2",
+  "description": "Powerful WhatsApp Multi-Device User Bot Powered by Baileys",
+  "repository": "https://github.com/peter-shirima/hans-techy-v2",
+  "logo": "https://telegra.ph/file/2a2e4e1a72a15998df9a8.jpg",
+  "keywords": ["whatsapp", "bot", "baileys", "hans-techy", "multi-device"],
+  "env": {
+    "SESSION_ID": {
+      "description": "Your Session ID generated from https://generatepaircode.lovable.app",
+      "required": true
+    },
+    "OWNER_NAME": {
+      "description": "Owner Name",
+      "value": "HANS TECHY",
+      "required": false
+    },
+    "OWNER_NUMBER": {
+      "description": "Owner WhatsApp number without + (e.g. 255686005775)",
+      "value": "255686005775",
+      "required": true
+    },
+    "PREFIX": {
+      "description": "Command prefix symbol",
+      "value": ".",
+      "required": false
+    },
+    "BOT_NAME": {
+      "description": "Name of the bot",
+      "value": "HANS TECHY V2",
+      "required": false
+    }
+  },
+  "formation": {
+    "worker": {
+      "quantity": 1,
+      "size": "eco"
+    }
+  }
+}
