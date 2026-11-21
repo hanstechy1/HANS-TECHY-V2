@@ -1,0 +1,19 @@
+{
+  "name": "hans-techy-v2",
+  "version": "2.0.0",
+  "description": "HANS TECHY V2 WhatsApp Bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=20.x"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.18",
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5",
+    "fs-extra": "^11.2.0",
+    "pino": "^8.19.0"
+  }
+}
