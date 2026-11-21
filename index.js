@@ -20,16 +20,18 @@ let BOT_NAME = process.env.BOT_NAME || 'HANS TECHY V2';
 let OWNER_NAME = process.env.OWNER_NAME || 'HANS TECHY';
 let OWNER_NUMBER = (process.env.OWNER_NUMBER || '255686005775').replace(/\D/g, '');
 let BOT_MODE = 'PUBLIC';
-let AUTO_VIEW_STATUS = true;
-let AUTO_LIKE_STATUS = true;
+
+// Tumezima hizi ili kuzuia WhatsApp isizuie namba (Anti-Ban/Anti-Shadowban)
+let AUTO_VIEW_STATUS = false;
+let AUTO_LIKE_STATUS = false;
 let ANTILINK = false;
 let ANTISPAM = false;
 
-// Hifadhi ya ujumbe na cache ya retry kuondoa "Waiting for this message"
+// Hifadhi ya ujumbe kuondoa "Waiting for this message"
 const messageStore = new Map();
 const msgRetryCounterCache = new Map();
 
-// API endpoint ya kupata JSON Status
+// API endpoint ya JSON Status
 app.get('/api/status', (req, res) => {
   res.json({
     status: 'ONLINE',
@@ -588,7 +590,7 @@ async function startBot() {
     syncFullHistory: false,
     markOnlineOnConnect: true,
     generateHighQualityLinkPreview: false,
-    // Huondoa kabisa tatizo la "Waiting for this message"
+    // Huondoa na kurekebisha "Waiting for this message"
     msgRetryCounterCache,
     getMessage: async (key) => {
       if (messageStore.has(key.id)) {
@@ -617,7 +619,7 @@ async function startBot() {
     const msg = messages[0];
     if (!msg?.message) return;
 
-    // Hifadhi ujumbe kwenye cache
+    // Hifadhi ujumbe kwenye cache kwa ajili ya retry
     if (msg.key?.id) {
       messageStore.set(msg.key.id, msg.message);
       if (messageStore.size > 1500) {
@@ -654,10 +656,15 @@ async function startBot() {
     const command = args.shift().toLowerCase();
     const q = args.join(' ');
 
-    const isOwner = msg.key.fromMe || (from && from.includes(OWNER_NUMBER));
+    // Utambuzi thabiti wa Owner kwenye DM na Magroup
+    const sender = msg.key.participant || from;
+    const senderDigits = (sender || '').replace(/\D/g, '');
+    const isOwner = msg.key.fromMe || senderDigits === OWNER_NUMBER;
+
     if (BOT_MODE === 'PRIVATE' && !isOwner) return;
 
-    const reply = (txt) => sock.sendMessage(from, { text: txt }, { quoted: msg });
+    // Kutuma moja kwa moja bila { quoted: msg } ili ujumbe ufike kwa kila mtu bila kukwama
+    const reply = (txt) => sock.sendMessage(from, { text: txt });
 
     // ==========================================
     // ALL 130+ COMMAND HANDLERS
@@ -762,7 +769,7 @@ async function startBot() {
           let tagMsg = `📢 *ATTENTION EVERYONE*\n💬 ${q || 'Notice from Admin'}\n\n`;
           const mentions = meta.participants.map(p => p.id);
           mentions.forEach(m => tagMsg += `@${m.split('@')[0]}\n`);
-          return sock.sendMessage(from, { text: tagMsg, mentions }, { quoted: msg });
+          return sock.sendMessage(from, { text: tagMsg, mentions });
         } catch {
           return reply('❌ Could not fetch members.');
         }
@@ -798,7 +805,7 @@ async function startBot() {
       case 'goodbye':
       case 'antilink':
       case 'antispam':
-        return reply(`🛡️ *${command.toUpperCase}:* Configured to active on this group.`);
+        return reply(`🛡️ *${command.toUpperCase()}:* Configured to active on this group.`);
 
       case 'poll':
         return reply(`📊 *Poll Creator:* Usage: ${PREFIX}poll Question | Option1 | Option2`);
