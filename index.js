@@ -15,16 +15,34 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.get('/', (req, res) => {
+let PREFIX = process.env.PREFIX || '.';
+let BOT_NAME = process.env.BOT_NAME || 'HANS TECHY V2';
+let OWNER_NAME = process.env.OWNER_NAME || 'HANS TECHY';
+let OWNER_NUMBER = (process.env.OWNER_NUMBER || '255686005775').replace(/\D/g, '');
+let BOT_MODE = 'PUBLIC';
+let AUTO_VIEW_STATUS = true;
+let AUTO_LIKE_STATUS = true;
+let ANTILINK = false;
+let ANTISPAM = false;
+
+// Hifadhi ya ujumbe na cache ya retry kuondoa "Waiting for this message"
+const messageStore = new Map();
+const msgRetryCounterCache = new Map();
+
+// API endpoint ya kupata JSON Status
+app.get('/api/status', (req, res) => {
   res.json({
     status: 'ONLINE',
-    bot: process.env.BOT_NAME || 'HANS TECHY V2',
-    owner: process.env.OWNER_NUMBER || '255686005775',
+    bot: BOT_NAME,
+    owner: OWNER_NUMBER,
     commands_loaded: 130,
-    speed: 'Ultra Fast ⚡'
+    speed: 'Ultra Fast ⚡',
+    ram: `${(process.memoryUsage().rss / (1024 * 1024)).toFixed(1)} MB`,
+    uptime: `${Math.floor(process.uptime())}s`
   });
 });
 
+// Dashboard ya Heroku yenye Animations za kisasa
 app.get('/', (req, res) => {
   const uptime = Math.floor(process.uptime());
   const ram = (process.memoryUsage().rss / (1024 * 1024)).toFixed(1);
@@ -52,48 +70,51 @@ app.get('/', (req, res) => {
       position: relative;
     }
 
-    /* Animated background glow */
     .bg-glow {
       position: absolute;
-      width: 500px;
-      height: 500px;
-      background: radial-gradient(circle, rgba(0, 255, 136, 0.15) 0%, rgba(0, 210, 255, 0.05) 50%, transparent 70%);
-      filter: blur(60px);
+      width: 550px;
+      height: 550px;
+      background: radial-gradient(circle, rgba(0, 255, 136, 0.18) 0%, rgba(0, 210, 255, 0.08) 50%, transparent 70%);
+      filter: blur(70px);
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
-      animation: floatGlow 8s ease-in-out infinite alternate;
+      animation: floatGlow 7s ease-in-out infinite alternate;
       z-index: 0;
       pointer-events: none;
     }
 
     @keyframes floatGlow {
-      0% { transform: translate(-50%, -50%) scale(0.9); }
-      100% { transform: translate(-50%, -50%) scale(1.15); }
+      0% { transform: translate(-50%, -50%) scale(0.85); opacity: 0.7; }
+      100% { transform: translate(-50%, -50%) scale(1.2); opacity: 1; }
     }
 
     .container {
       position: relative;
       z-index: 1;
       width: 100%;
-      max-w: 640px;
-      max-width: 600px;
-      background: rgba(15, 23, 42, 0.75);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      max-width: 620px;
+      background: rgba(15, 23, 42, 0.78);
+      border: 1px solid rgba(0, 255, 136, 0.25);
+      backdrop-filter: blur(25px);
+      -webkit-backdrop-filter: blur(25px);
       border-radius: 28px;
-      padding: 36px 32px;
-      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 40px rgba(0, 255, 136, 0.1);
+      padding: 38px 32px;
+      box-shadow: 0 25px 60px -12px rgba(0, 0, 0, 0.8), 0 0 35px rgba(0, 255, 136, 0.15);
       text-align: center;
+      animation: slideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
-    /* Radar Pulse Animation */
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(30px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
     .pulse-wrapper {
       position: relative;
-      width: 90px;
-      height: 90px;
-      margin: 0 auto 20px;
+      width: 100px;
+      height: 100px;
+      margin: 0 auto 22px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -112,16 +133,16 @@ app.get('/', (req, res) => {
     .pulse-ring:nth-child(3) { animation-delay: 1.6s; }
 
     @keyframes pulseWave {
-      0% { transform: scale(0.5); opacity: 0.9; }
-      100% { transform: scale(1.8); opacity: 0; }
+      0% { transform: scale(0.4); opacity: 0.9; }
+      100% { transform: scale(1.9); opacity: 0; }
     }
 
     .pulse-core {
-      width: 44px;
-      height: 44px;
+      width: 48px;
+      height: 48px;
       border-radius: 50%;
       background: linear-gradient(135deg, #00ff88 0%, #00d2ff 100%);
-      box-shadow: 0 0 25px #00ff88;
+      box-shadow: 0 0 30px #00ff88;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -130,8 +151,8 @@ app.get('/', (req, res) => {
     }
 
     @keyframes coreBreath {
-      0% { transform: scale(0.95); box-shadow: 0 0 15px #00ff88; }
-      100% { transform: scale(1.08); box-shadow: 0 0 30px #00d2ff; }
+      0% { transform: scale(0.92); box-shadow: 0 0 15px #00ff88; }
+      100% { transform: scale(1.1); box-shadow: 0 0 35px #00d2ff; }
     }
 
     .badge {
@@ -139,30 +160,31 @@ app.get('/', (req, res) => {
       align-items: center;
       gap: 8px;
       background: rgba(0, 255, 136, 0.12);
-      border: 1px solid rgba(0, 255, 136, 0.3);
-      padding: 6px 14px;
+      border: 1px solid rgba(0, 255, 136, 0.35);
+      padding: 7px 16px;
       border-radius: 999px;
       font-size: 13px;
       font-weight: 700;
       color: #00ff88;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.6px;
       text-transform: uppercase;
-      margin-bottom: 12px;
+      margin-bottom: 14px;
+      box-shadow: 0 0 20px rgba(0, 255, 136, 0.2);
     }
 
     .badge-dot {
-      width: 8px;
-      height: 8px;
+      width: 9px;
+      height: 9px;
       border-radius: 50%;
       background: #00ff88;
-      box-shadow: 0 0 8px #00ff88;
+      box-shadow: 0 0 10px #00ff88;
       animation: blink 1.2s infinite;
     }
 
-    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
     h1 {
-      font-size: 32px;
+      font-size: 34px;
       font-weight: 800;
       letter-spacing: -0.5px;
       background: linear-gradient(135deg, #ffffff 0%, #94a3b8 100%);
@@ -177,7 +199,6 @@ app.get('/', (req, res) => {
       margin-bottom: 28px;
     }
 
-    /* Grid of Stats */
     .grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
@@ -186,17 +207,18 @@ app.get('/', (req, res) => {
     }
 
     .card {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid rgba(255, 255, 255, 0.07);
-      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 20px;
       padding: 18px 16px;
       text-align: left;
       transition: all 0.3s ease;
     }
     .card:hover {
-      background: rgba(255, 255, 255, 0.06);
-      border-color: rgba(0, 255, 136, 0.3);
-      transform: translateY(-2px);
+      background: rgba(255, 255, 255, 0.07);
+      border-color: rgba(0, 255, 136, 0.4);
+      transform: translateY(-3px);
+      box-shadow: 0 10px 25px -5px rgba(0, 255, 136, 0.15);
     }
 
     .card-label {
@@ -236,7 +258,7 @@ app.get('/', (req, res) => {
       font-size: 14px;
       font-weight: 700;
       text-decoration: none;
-      transition: all 0.2s;
+      transition: all 0.25s ease;
     }
 
     .btn-primary {
@@ -245,23 +267,25 @@ app.get('/', (req, res) => {
       box-shadow: 0 4px 20px rgba(0, 255, 136, 0.35);
     }
     .btn-primary:hover {
-      transform: scale(1.02);
-      box-shadow: 0 6px 28px rgba(0, 255, 136, 0.5);
+      transform: scale(1.03);
+      box-shadow: 0 8px 30px rgba(0, 255, 136, 0.6);
     }
 
     .btn-secondary {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.12);
       color: #f1f5f9;
     }
     .btn-secondary:hover {
-      background: rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(0, 255, 136, 0.3);
+      transform: scale(1.02);
     }
 
     .footer {
-      margin-top: 24px;
+      margin-top: 26px;
       font-size: 12px;
-      color: #475569;
+      color: #64748b;
     }
   </style>
 </head>
@@ -274,8 +298,8 @@ app.get('/', (req, res) => {
       <div class="pulse-ring"></div>
       <div class="pulse-ring"></div>
       <div class="pulse-core">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#050811" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#050811" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
         </svg>
       </div>
     </div>
@@ -337,19 +361,13 @@ app.get('/', (req, res) => {
   res.send(html);
 });
 
+// Washa Express Server kwa ajili ya Heroku Web Dyno
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🌐 Live Dashboard active on port ${PORT}`);
+});
 
 process.on('uncaughtException', (err) => console.log('[EXC]', err?.message || err));
 process.on('unhandledRejection', (err) => console.log('[REJ]', err?.message || err));
-
-let PREFIX = process.env.PREFIX || '.';
-let BOT_NAME = process.env.BOT_NAME || 'HANS TECHY V2';
-let OWNER_NAME = process.env.OWNER_NAME || 'HANS TECHY';
-let OWNER_NUMBER = (process.env.OWNER_NUMBER || '255686005775').replace(/\D/g, '');
-let BOT_MODE = 'PUBLIC';
-let AUTO_VIEW_STATUS = true;
-let AUTO_LIKE_STATUS = true;
-let ANTILINK = false;
-let ANTISPAM = false;
 
 async function setupAuth() {
   const dir = './session';
@@ -569,7 +587,15 @@ async function startBot() {
     browser: Browsers.macOS('Desktop'),
     syncFullHistory: false,
     markOnlineOnConnect: true,
-    generateHighQualityLinkPreview: false
+    generateHighQualityLinkPreview: false,
+    // Huondoa kabisa tatizo la "Waiting for this message"
+    msgRetryCounterCache,
+    getMessage: async (key) => {
+      if (messageStore.has(key.id)) {
+        return messageStore.get(key.id);
+      }
+      return undefined;
+    }
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -590,6 +616,15 @@ async function startBot() {
     if (type !== 'notify') return;
     const msg = messages[0];
     if (!msg?.message) return;
+
+    // Hifadhi ujumbe kwenye cache
+    if (msg.key?.id) {
+      messageStore.set(msg.key.id, msg.message);
+      if (messageStore.size > 1500) {
+        const firstKey = messageStore.keys().next().value;
+        messageStore.delete(firstKey);
+      }
+    }
 
     const from = msg.key.remoteJid;
 
@@ -763,7 +798,7 @@ async function startBot() {
       case 'goodbye':
       case 'antilink':
       case 'antispam':
-        return reply(`🛡️ *${command.toUpperCase()}:* Configured to active on this group.`);
+        return reply(`🛡️ *${command.toUpperCase}:* Configured to active on this group.`);
 
       case 'poll':
         return reply(`📊 *Poll Creator:* Usage: ${PREFIX}poll Question | Option1 | Option2`);
