@@ -1,108 +1,102 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  Browsers,
+  makeCacheableSignalKeyStore
+} = require('@whiskeysockets/baileys');
+const fs = require('fs-extra');
 const pino = require('pino');
-const fs = require('fs');
-const path = require('path');
 const config = require('./config');
-const { handleCommand } = require('./commands');
+const { handleCommand } = require('./command');
 
-// Cache ya kuhifadhi ujumbe kuzuia "Waiting for this message"
+const botStatus = { connected: false, user: null };
 const messageStore = new Map();
-const sessionDir = path.resolve('session');
+const msgRetryCounterCache = new Map();
+const groupCache = new Map();
 
-let botStatus = {
-  connected: false,
-  uptime: Date.now(),
-  user: null
-};
+async function setupAuth() {
+  const dir = './session';
+  await fs.ensureDir(dir);
+  if (!config.SESSION_ID) return false;
 
-// Kufungua SESSION_ID (inasaidia miundo yote: yenye nafasi, kistari au v2)
-function prepareSession() {
-  if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
-  
-  if (config.SESSION_ID) {
-    try {
-      let raw = config.SESSION_ID.trim();
-
-      // Ondoa jina lolote lililopo kabla ya alama ya ~
-      if (raw.includes('~')) {
-        const parts = raw.split('~');
-        if (parts[1] === 'v2' && parts.length > 2) {
-          raw = parts.slice(2).join('~');
-        } else {
-          raw = parts.slice(1).join('~');
-        }
-      }
-
-      let credsJson;
-      try {
-        // Jaribu kama ni JSON ya moja kwa moja
-        credsJson = JSON.parse(raw);
-      } catch (e) {
-        // Ikiwa ni Base64, ifungue
-        const decoded = Buffer.from(raw, 'base64').toString('utf-8');
-        credsJson = JSON.parse(decoded);
-      }
-
-      // Sasisha creds.json kwa session hii mpya
-      fs.writeFileSync(path.join(sessionDir, 'creds.json'), JSON.stringify(credsJson, null, 2));
-      console.log('✅ Session creds.json imesasishwa kikamilifu kwa: ' + (credsJson.me?.id || 'Bot'));
-    } catch (e) {
-      console.error('Hitilafu ya kufungua SESSION_ID:', e.message);
-    }
+  const base64 = config.SESSION_ID.includes('~') ? config.SESSION_ID.split('~')[1] : config.SESSION_ID;
+  try {
+    const credsJson = Buffer.from(base64.trim(), 'base64').toString('utf-8');
+    await fs.writeFile(`${dir}/creds.json`, credsJson);
+    return true;
+  } catch (e) {
+    return false;
   }
 }
 
-
 async function startBot() {
-  prepareSession();
-  const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+  const ready = await setupAuth();
+  if (!ready) {
+    console.log('⚠️ SESSION_ID haikuwekwa kwenye Heroku Config Vars!');
+    return;
+  }
+
+  const { state, saveCreds } = await useMultiFileAuthState('./session');
+  const logger = pino({ level: 'silent' });
 
   const sock = makeWASocket({
-    auth: state,
-    logger: pino({ level: 'silent' }),
-    browser: Browsers.ubuntu('Chrome'),
+    logger,
     printQRInTerminal: false,
-    getMessage: async (key) => {
-      const msg = messageStore.get(key.id);
-      return msg || undefined;
-    }
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, logger)
+    },
+    browser: Browsers.ubuntu('Chrome'),
+    syncFullHistory: false,
+    markOnlineOnConnect: true,
+    msgRetryCounterCache,
+    getMessage: async (key) => messageStore.get(key.id)
   });
 
   sock.ev.on('creds.update', saveCreds);
 
-  sock.ev.on('connection.update', ({ connection, lastDisconnect }) => {
-    if (connection === 'open') {
-      botStatus.connected = true;
-      botStatus.user = sock.user?.id?.split(':')[0];
-      console.log(`✅ Bot imeunganishwa kama: ${botStatus.user}`);
-    } else if (connection === 'close') {
+  sock.ev.on('connection.update', (update) => {
+    const { connection, lastDisconnect } = update;
+    if (connection === 'close') {
       botStatus.connected = false;
-      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log('Muunganisho umekatika. Inajaribu tena:', shouldReconnect);
-      if (shouldReconnect) {
+      const code = lastDisconnect?.error?.output?.statusCode;
+      if (code !== DisconnectReason.loggedOut) {
         setTimeout(startBot, 4000);
       }
+    } else if (connection === 'open') {
+      botStatus.connected = true;
+      botStatus.user = sock.user?.id ? sock.user.id.split(':')[0] : config.OWNER_NUMBER;
+      console.log(`🚀 ${config.BOT_NAME} imeunganishwa kikamilifu!`);
     }
   });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
-    for (const msg of messages) {
-      // Hifadhi ujumbe kwenye cache
-      if (msg.key?.id && msg.message) {
-        messageStore.set(msg.key.id, msg.message);
-        if (messageStore.size > 1500) {
-          const firstKey = messageStore.keys().next().value;
-          messageStore.delete(firstKey);
-        }
-      }
+    const msg = messages[0];
+    if (!msg?.message) return;
 
-      // Tuma kwenye command handler
-      await handleCommand(sock, msg);
-    }
+    if (msg.key?.id) messageStore.set(msg.key.id, msg.message);
+    const from = msg.key.remoteJid;
+    if (from === 'status@broadcast') return;
+
+    const content = msg.message?.ephemeralMessage?.message || msg.message;
+    const rawText = content?.conversation || content?.extendedTextMessage?.text || content?.imageMessage?.caption || '';
+    const text = rawText.trim();
+    if (!text.startsWith(config.PREFIX)) return;
+
+    const args = text.slice(config.PREFIX.length).trim().split(/ +/);
+    const command = args.shift().toLowerCase();
+    const q = args.join(' ');
+
+    const sender = msg.key.participant || from;
+    const senderDigits = (sender || '').replace(/\D/g, '');
+    const isOwner = msg.key.fromMe || senderDigits === config.OWNER_NUMBER;
+
+    const reply = async (txt) => sock.sendMessage(from, { text: txt });
+
+    await handleCommand({ sock, msg, from, sender, isOwner, reply, args, command, q, config });
   });
-
-  return sock;
 }
 
 module.exports = { startBot, botStatus };
