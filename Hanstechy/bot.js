@@ -15,24 +15,43 @@ let botStatus = {
   user: null
 };
 
-// Kufungua SESSION_ID
+// Kufungua SESSION_ID (inasaidia miundo yote: yenye nafasi, kistari au v2)
 function prepareSession() {
   if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
-  if (config.SESSION_ID && !fs.existsSync(path.join(sessionDir, 'creds.json'))) {
+  
+  if (config.SESSION_ID) {
     try {
       let raw = config.SESSION_ID.trim();
-      if (raw.startsWith('HANS-TECHY~')) {
+
+      // Ondoa jina lolote lililopo kabla ya alama ya ~
+      if (raw.includes('~')) {
         const parts = raw.split('~');
-        raw = parts.slice(parts[1] === 'v2' ? 2 : 1).join('~');
+        if (parts[1] === 'v2' && parts.length > 2) {
+          raw = parts.slice(2).join('~');
+        } else {
+          raw = parts.slice(1).join('~');
+        }
       }
-      const decoded = Buffer.from(raw, 'base64').toString('utf-8');
-      fs.writeFileSync(path.join(sessionDir, 'creds.json'), decoded);
-      console.log('Session creds.json imetengenezwa.');
+
+      let credsJson;
+      try {
+        // Jaribu kama ni JSON ya moja kwa moja
+        credsJson = JSON.parse(raw);
+      } catch (e) {
+        // Ikiwa ni Base64, ifungue
+        const decoded = Buffer.from(raw, 'base64').toString('utf-8');
+        credsJson = JSON.parse(decoded);
+      }
+
+      // Sasisha creds.json kwa session hii mpya
+      fs.writeFileSync(path.join(sessionDir, 'creds.json'), JSON.stringify(credsJson, null, 2));
+      console.log('✅ Session creds.json imesasishwa kikamilifu kwa: ' + (credsJson.me?.id || 'Bot'));
     } catch (e) {
       console.error('Hitilafu ya kufungua SESSION_ID:', e.message);
     }
   }
 }
+
 
 async function startBot() {
   prepareSession();
