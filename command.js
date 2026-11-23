@@ -1,7 +1,3 @@
-/**
- * HANS TECHY V2 - Full Command Registry & Handlers (English)
- * Contains all 147 commands matching the official menu
- */
 
 const axios = require('axios');
 const os = require('os');
