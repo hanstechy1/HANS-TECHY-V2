@@ -162,7 +162,7 @@ async function handleSingleMessage(conn, upsert) {
     try {
       if (upsert.messages?.[0]?.key?.remoteJid) {
         await conn.sendMessage(upsert.messages[0].key.remoteJid, {
-          text: `❌ An error occurred while executing the command: ${err.message}`
+          text: '❌ Command failed. Please try again or contact the bot owner.'
         }, { quoted: upsert.messages[0] }).catch(() => null);
       }
     } catch {
