@@ -139,14 +139,22 @@ async function startBot() {
       console.log(`🚀 ${config.BOT_NAME || 'HANS TECHY'} imeunganishwa kikamilifu!`);
     }
   });
+    const { handleCommand } = require('./command');
 
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
-    const msg = messages[0];
-    if (!msg?.message) return;
+sock.ev.on('messages.upsert', async ({ messages, type }) => {
+  
+  if (type !== 'notify') return;
 
-    saveMessageToStore(msg);
-    const from = msg.key.remoteJid;
+  for (const msg of messages) {
+    if (!msg || !msg.message) continue;
+    if (msg.key && msg.key.id) {
+      messageStore.set(msg.key.id, msg.message);
+    }
+    await handleCommand(sock, msg);
+  }
+});
+
+  
 
     const reply = async (txt) => {
       try {
