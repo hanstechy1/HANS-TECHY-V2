@@ -9,16 +9,14 @@ const {
 const fs = require('fs-extra');
 const pino = require('pino');
 const NodeCache = require('node-cache');
-const express = require('express');
 const config = require('./config');
 const { handleCommand } = require('./command');
 
-// 1. Cache maalum za kuzuia "Waiting for this message"
+// Cache maalum za kuzuia "Waiting for this message"
 const msgRetryCounterCache = new NodeCache({ stdTTL: 300, useClones: false });
 const groupCache = new NodeCache({ stdTTL: 300, useClones: false });
 const messageStore = new Map();
 
-// Helper ya kuhifadhi ujumbe kwenye messageStore
 function saveMessageToStore(m) {
   if (m?.key?.id && m?.message) {
     messageStore.set(m.key.id, m.message);
@@ -34,12 +32,11 @@ let botStatus = {
   user: null
 };
 
-// 2. Auth salama: Hatuandiki upya creds.json kama tayari zipo
+// Hifadhi creds.json mara moja tu bila kuharibu funguo mpya za WhatsApp
 async function setupAuth() {
   const dir = './session';
   await fs.ensureDir(dir);
   
-  // Kama faili lipo tayari, usilibadilishe ili usipoteze Signal keys zilizosasishwa
   if (await fs.pathExists(`${dir}/creds.json`)) {
     return true;
   }
@@ -81,7 +78,7 @@ async function startBot() {
     generateHighQualityLinkPreview: false,
     msgRetryCounterCache,
 
-    // Inatafuta taarifa za Group mara moja ili kuzuia kukwama kwa meseji za group
+    // Inaleta data za kundi mapema ili meseji za group zifunguke mara moja
     cachedGroupMetadata: async (jid) => {
       let data = groupCache.get(jid);
       if (!data) {
@@ -93,7 +90,7 @@ async function startBot() {
       return data;
     },
 
-    // Inarudisha ujumbe uliopita wakati simu ya mpokeaji inapotuma ombi la retry
+    // Inajibu maombi ya retry ya simu za wanachama
     getMessage: async (key) => {
       if (messageStore.has(key.id)) {
         return messageStore.get(key.id);
@@ -102,7 +99,7 @@ async function startBot() {
     }
   });
 
-  // Kunasa ujumbe wote unaotumwa na bot (hata kutoka command.js) ili kuhakikisha unahifadhiwa kwa ajili ya retry
+  // Hifadhi meseji zote zinazotumwa na bot (hata za picha/media)
   const rawSendMessage = sock.sendMessage.bind(sock);
   sock.sendMessage = async (...args) => {
     const sent = await rawSendMessage(...args);
@@ -112,7 +109,6 @@ async function startBot() {
 
   sock.ev.on('creds.update', saveCreds);
 
-  // Kujaza groupCache kiotomatiki wanachama wakibadilika au kundi likisasishwa
   sock.ev.on('groups.update', async (updates) => {
     for (const update of updates) {
       try {
@@ -149,12 +145,9 @@ async function startBot() {
     const msg = messages[0];
     if (!msg?.message) return;
 
-    // Hifadhi ujumbe unaoingia kwenye cache mara moja
     saveMessageToStore(msg);
-
     const from = msg.key.remoteJid;
 
-    // Function ya kutuma ujumbe
     const reply = async (txt) => {
       try {
         await sock.sendPresenceUpdate('composing', from).catch(() => {});
@@ -167,25 +160,8 @@ async function startBot() {
       }
     };
 
-    // Peleka ujumbe kwenye command handler
     await handleCommand(sock, msg, reply, { messageStore, groupCache });
   });
 }
-
-// 3. Web server ndogo ya kuzuia Heroku Crash (H10)
-const app = express();
-const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => {
-  res.json({
-    status: botStatus.connected ? 'online' : 'connecting',
-    bot: config.BOT_NAME || 'HANS TECHY V2',
-    user: botStatus.user
-  });
-});
-app.listen(PORT, () => {
-  console.log(`Web server inasikiliza port: ${PORT}`);
-});
-
-startBot();
 
 module.exports = { startBot, botStatus };
