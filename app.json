@@ -1,7 +1,7 @@
 {
   "name": "HANS-TECHY-V2",
   "description": "Multi-Device WhatsApp Bot created by HANS TECHY",
-  "logo": "https://telegra.ph/file/2a06381b260c3f096a612.jpg",
+  "logo": "https://user59059.na.imgto.link",
   "keywords": [
     "whatsapp",
     "bot",
@@ -14,7 +14,7 @@
   "env": {
     "SESSION_ID": {
       "description": "Enter your WhatsApp SESSION_ID here (or leave empty if using pairing code / QR code).",
-      "required": false,
+      "required": true,
       "value": ""
     },
     "PREFIX": {
@@ -34,7 +34,7 @@
     },
     "BOT_NAME": {
       "description": "Bot display name.",
-      "required": false,
+      "required": true,
       "value": "HANS TECHY V2"
     },
     "MODE": {
