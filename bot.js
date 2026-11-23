@@ -8,6 +8,8 @@ const {
 const pino = require('pino');
 const config = require('./config');
 const { handleCommand } = require('./command');
+const botStatus = { connected: false };
+
 
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('session');
@@ -24,12 +26,12 @@ async function startBot() {
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect } = update;
-    if (connection === 'close') {
-      const shouldReconnect =
-        lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      if (shouldReconnect) startBot();
+       if (connection === 'close') {
+      botStatus.connected = false;
+      // ...
     } else if (connection === 'open') {
-      console.log('✅ WhatsApp Bot Connected!');
+      botStatus.connected = true;
+      console.log(`🚀 ${config.BOT_NAME || 'HANS TECHY V2'} is connected and active!`);
     }
   });
 
@@ -41,4 +43,4 @@ async function startBot() {
   });
 }
 
-module.exports = { startBot };
+module.exports = { startBot, botstatus };
