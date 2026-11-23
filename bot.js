@@ -171,4 +171,4 @@ async function handleMessage(conn, upsert) {
   }
 }
 
-module.exports = { handleMessage };
+module.exports = { startBot, botstatus };
