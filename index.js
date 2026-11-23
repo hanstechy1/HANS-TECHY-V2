@@ -137,3 +137,5 @@ startBot().catch((error) => {
   console.error(chalk.red('Fatal initialization error:'), error);
   scheduleReconnect();
 });
+
+
