@@ -2,6 +2,7 @@
   <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=0,2,2&height=180&section=header&text=⚡%20HANS%20TECHY%20V2%20⚡&fontSize=42&fontColor=fff&animation=twinkling&fontAlignY=38" width="100%"/>
 </p>
 
+
 <p align="center">
   <a href="https://git.io/typing-svg">
     <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&weight=600&size=22&duration=3000&pause=1000&color=00FF66&center=true&vCenter=true&width=550&lines=⚡+WELCOME+TO+HANS+TECHY+V2+⚡;🤖+NEXT-GEN+WHATSAPP+USER+BOT;🚀+ULTRA+FAST+%E2%80%A2+130%2B+COMMANDS;💎+BUILT+WITH+BAILEYS+MULTI-DEVICE" alt="Typing SVG" />
