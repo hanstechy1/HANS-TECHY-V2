@@ -34,7 +34,7 @@ function restoreSessionFromEnv() {
   if (sessionId && !fs.existsSync(credsPath)) {
     try {
       console.log(chalk.blue('ℹ️ Restoring session credentials from SESSION_ID...'));
-      // Remove custom prefix if present (e.g., HANS~, HANS_TECHY~)
+      // Remove custom prefix if present (e.g., HANS~, HANS TECHY~)
       const cleanSession = sessionId.includes('~') ? sessionId.split('~')[1] : sessionId;
       const decoded = Buffer.from(cleanSession, 'base64').toString('utf-8');
       fs.writeFileSync(credsPath, decoded);
