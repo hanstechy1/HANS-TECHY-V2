@@ -116,7 +116,7 @@ async function handleMessage(conn, upsert) {
 
     // 5. MODE RESTRICTION
     if (mode === 'private' && !isOwner) {
-      return; // In private mode, non-owners cannot execute commands
+      return;
     }
 
     // 6. FIND MATCHING COMMAND
