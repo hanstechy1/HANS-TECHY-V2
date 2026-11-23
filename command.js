@@ -261,7 +261,7 @@ cmd({
 }, async (conn, m, { args }) => {
   const replyMsg = args.join(' ');
   if (!replyMsg) return await conn.sendMessage(m.from, { text: '⚠️ Enter the reply message for the status!' }, { quoted: m });
-  await conn.sendMessage(m.from, { text: `✅ Status reply registered: "${replyMsg}"` }, { quoted: m });
+  await conn.sendMessage(m.from, { text: '⚠️ Automatic status replies are not implemented yet. No reply was sent.' }, { quoted: m });
 });
 
 cmd({
@@ -1097,13 +1097,13 @@ cmd({ pattern: 'restart', desc: 'Restart bot process', category: 'owner', onlyOw
 });
 
 cmd({ pattern: 'update', desc: 'Check for updates', category: 'owner', onlyOwner: true }, async (conn, m) => {
-  await conn.sendMessage(m.from, { text: '🚀 You are running the latest version of *HANS TECHY V2*!' }, { quoted: m });
+  await conn.sendMessage(m.from, { text: '⚠️ Automatic update checking is not implemented yet. Check the GitHub repository for releases.' }, { quoted: m });
 });
 
 cmd({ pattern: 'broadcast', desc: 'Broadcast to chats', category: 'owner', onlyOwner: true }, async (conn, m, { args }) => {
   const text = args.join(' ');
   if (!text) return await conn.sendMessage(m.from, { text: '⚠️ Enter broadcast message!' }, { quoted: m });
-  await conn.sendMessage(m.from, { text: `📢 *Broadcast sent:* "${text}"` }, { quoted: m });
+  await conn.sendMessage(m.from, { text: '⚠️ Broadcast delivery is not implemented yet. No messages were sent to other chats.' }, { quoted: m });
 });
 
 cmd({ pattern: 'clearsession', desc: 'Clean session directory', category: 'owner', onlyOwner: true }, async (conn, m) => {
@@ -1231,7 +1231,7 @@ cmd({ pattern: 'channel', desc: 'Official WhatsApp channel', category: 'general'
 });
 
 cmd({ pattern: 'verify', desc: 'Verify bot integrity', category: 'general' }, async (conn, m) => {
-  await conn.sendMessage(m.from, { text: '✅ Verified Genuine HANS TECHY V2 Build.' }, { quoted: m });
+  await conn.sendMessage(m.from, { text: '⚠️ This build does not currently perform cryptographic integrity verification.' }, { quoted: m });
 });
 
 cmd({ pattern: 'jid', desc: 'Get current JID', category: 'general' }, async (conn, m) => {
@@ -1243,7 +1243,7 @@ cmd({ pattern: 'id', desc: 'Get sender user ID', category: 'general' }, async (c
 });
 
 cmd({ pattern: 'repo', desc: 'Source code repository', category: 'general' }, async (conn, m) => {
-  await conn.sendMessage(m.from, { text: '📦 *GitHub Repository:* https://github.com/hans-techy/HANS-TECHY-V2' }, { quoted: m });
+  await conn.sendMessage(m.from, { text: '📦 *GitHub Repository:* https://github.com/hanstechy1/HANS-TECHY-V2' }, { quoted: m });
 });
 
 cmd({ pattern: 'script', desc: 'Alias for repo', category: 'general' }, async (conn, m, extra) => {
