@@ -10,3 +10,4 @@ module.exports = {
   SESSION_ID: (process.env.SESSION_ID || '').trim(),
   BOT_MODE: (process.env.MODE || 'public').toUpperCase()
 };
+
