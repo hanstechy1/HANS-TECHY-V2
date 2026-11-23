@@ -3,12 +3,13 @@ const config = require('./config');
 const { startBot, botStatus } = require('./bot');
 
 const app = express();
+const PORT = process.env.PORT || config.PORT || 3000;
 
 app.get('/api/status', (req, res) => {
   res.json({
     status: botStatus.connected ? 'ONLINE' : 'OFFLINE',
-    bot: config.BOT_NAME,
-    owner: config.OWNER_NUMBER,
+    bot: config.BOT_NAME || 'HANS TECHY V2',
+    owner: config.OWNER_NUMBER || '',
     commands_loaded: 130,
     speed: 'Ultra Fast ⚡',
     ram: `${(process.memoryUsage().rss / (1024 * 1024)).toFixed(1)} MB`,
@@ -26,7 +27,7 @@ app.get('/', (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${config.BOT_NAME} — Live Status Dashboard</title>
+  <title>${config.BOT_NAME || 'HANS TECHY'} — Live Status Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
   <style>
@@ -259,14 +260,14 @@ app.get('/', (req, res) => {
       System Active 24/7
     </div>
 
-    <h1>${config.BOT_NAME}</h1>
+    <h1>${config.BOT_NAME || 'HANS TECHY V2'}</h1>
     <p class="subtitle">Ultra-Fast WhatsApp Multi-Device Automation Bot</p>
 
     <div class="grid">
       <div class="card">
         <div class="card-label">Server Status</div>
         <div class="card-value" style="color: ${isOnline ? '#00ff88' : '#eab308'};">
-          ${isOnline ? 'ONLINE ⚡' : 'WAITING SESSION ⏳'}
+          ${isOnline ? 'ONLINE ⚡' : 'CONNECTING ⏳'}
         </div>
       </div>
       <div class="card">
@@ -313,7 +314,7 @@ app.get('/', (req, res) => {
   res.send(html);
 });
 
-app.listen(config.PORT, '0.0.0.0', () => {
-  console.log(`🌐 Live Dashboard active on port ${config.PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🌐 Live Dashboard active on port ${PORT}`);
   startBot().catch(err => console.error('Kosa la kuanzisha bot:', err));
 });
