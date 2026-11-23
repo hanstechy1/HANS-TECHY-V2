@@ -1,3 +1,4 @@
+// index.js - HANS TECHY V2 Dashboard & Launcher
 const express = require('express');
 const config = require('./config');
 const { startBot, botStatus } = require('./bot');
@@ -6,6 +7,7 @@ const app = express();
 const PORT = process.env.PORT || config.PORT || 3000;
 const startTime = Date.now();
 
+// API Endpoint kwa ajili ya kuangalia hali
 app.get('/api/status', (req, res) => {
   const isOnline = Boolean(botStatus?.connected);
   res.json({
