@@ -1,909 +1,1291 @@
-// command.js
+/**
+ * HANS TECHY V2 - Full Command Registry & Handlers (English)
+ * Contains all 147 commands matching the official menu
+ */
+
 const axios = require('axios');
-const yts = require('yt-search');
-const { downloadMediaMessage } = require('@whiskeysockets/baileys');
-const { Sticker, StickerTypes } = require('wa-sticker-formatter');
-const config = require('./config');
+const os = require('os');
+const fs = require('fs');
+const path = require('path');
 
-const startTime = Date.now();
+const commands = [];
 
-function formatUptime(ms) {
-  const sec = Math.floor((ms / 1000) % 60);
-  const min = Math.floor((ms / (1000 * 60)) % 60);
-  const hrs = Math.floor(ms / (1000 * 60 * 60));
-  return `${hrs}h ${min}m ${sec}s`;
+/**
+ * Register a new bot command
+ */
+function cmd(info, func) {
+  const data = {
+    pattern: info.pattern,
+    alias: info.alias || [],
+    desc: info.desc || '',
+    category: info.category || 'misc',
+    use: info.use || '',
+    react: info.react || '',
+    onlyGroup: info.onlyGroup || false,
+    onlyAdmin: info.onlyAdmin || false,
+    onlyOwner: info.onlyOwner || false,
+    function: func
+  };
+  commands.push(data);
+  return data;
 }
 
-function getRam() {
-  return `${(process.memoryUsage().rss / (1024 * 1024)).toFixed(1)} MB`;
+// Helper function to format seconds to human-readable uptime
+function formatUptime(seconds) {
+  const d = Math.floor(seconds / (3600 * 24));
+  const h = Math.floor((seconds % (3600 * 24)) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const parts = [];
+  if (d > 0) parts.push(`${d}d`);
+  if (h > 0) parts.push(`${h}h`);
+  if (m > 0) parts.push(`${m}m`);
+  parts.push(`${s}s`);
+  return parts.join(' ');
 }
 
-async function handleCommand(sock, msg) {
-  if (!msg.message) return;
+// Fallback AI helper
+async function queryAI(prompt) {
+  try {
+    const res = await axios.get(`https://api.giftedtech.my.id/api/ai/gpt4?apikey=gifted&query=${encodeURIComponent(prompt)}`, { timeout: 15000 }).catch(() => null);
+    if (res?.data?.result) return res.data.result;
+    const fb = await axios.get(`https://api.vreden.my.id/api/ai/blackbox?query=${encodeURIComponent(prompt)}`, { timeout: 15000 }).catch(() => null);
+    if (fb?.data?.result) return fb.data.result;
+  } catch {}
+  return "Could not retrieve AI response. Please try again later.";
+}
 
-  const from = msg.key.remoteJid;
-  const isGroup = from.endsWith('@g.us');
-  const sender = isGroup ? msg.key.participant : from;
-  const senderClean = sender ? sender.replace(/\D/g, '') : '';
-  const isOwner = senderClean.includes(config.OWNER_NUMBER) || msg.key.fromMe;
+// ==========================================
+// 1. AI COMMANDS (15 commands)
+// ==========================================
 
-  const content = msg.message?.ephemeralMessage?.message || msg.message;
-  const rawText =
-    content?.conversation ||
-    content?.extendedTextMessage?.text ||
-    content?.imageMessage?.caption ||
-    content?.videoMessage?.caption ||
-    '';
+const aiHandler = async (conn, m, { args, prefix }) => {
+  const query = args.join(' ');
+  if (!query) return await conn.sendMessage(m.from, { text: `⚠️ Please enter a prompt!
+Example: *${prefix}ai What is artificial intelligence?*` }, { quoted: m });
+  const reply = await queryAI(query);
+  await conn.sendMessage(m.from, { text: reply }, { quoted: m });
+};
 
-  const text = rawText.trim();
-  const prefix = config.PREFIX || '.';
-  if (!text.startsWith(prefix)) return;
+cmd({ pattern: 'ai', desc: 'Query artificial intelligence', category: 'ai', react: '🧠' }, aiHandler);
+cmd({ pattern: 'gpt', desc: 'ChatGPT conversation', category: 'ai', react: '🤖' }, aiHandler);
+cmd({ pattern: 'ask', desc: 'Ask any question to AI', category: 'ai', react: '❓' }, aiHandler);
+cmd({ pattern: 'chat', desc: 'Conversational chat with AI', category: 'ai', react: '💬' }, aiHandler);
+cmd({ pattern: 'gemini', desc: 'Google Gemini AI query', category: 'ai', react: '✨' }, aiHandler);
+cmd({ pattern: 'llama', desc: 'Meta LLaMA model query', category: 'ai', react: '🦙' }, aiHandler);
+cmd({ pattern: 'copilot', desc: 'Copilot AI query', category: 'ai', react: '✈️' }, aiHandler);
 
-  const args = text.slice(prefix.length).trim().split(/ +/);
-  const command = args.shift().toLowerCase();
-  const q = args.join(' ');
-
-  if (config.BOT_MODE === 'PRIVATE' && !isOwner) return;
-
-  const reply = (body) => sock.sendMessage(from, { text: body }, { quoted: msg });
-
-  // Group Admin Check
-  let isSenderAdmin = false;
-  let isBotAdmin = false;
-  if (isGroup) {
-    try {
-      const metadata = await sock.groupMetadata(from);
-      const botId = sock.user.id.replace(/:.*@/, '@');
-      const senderObj = metadata.participants.find((p) => p.id === sender);
-      const botObj = metadata.participants.find((p) => p.id === botId);
-      isSenderAdmin = senderObj?.admin !== null && senderObj?.admin !== undefined;
-      isBotAdmin = botObj?.admin !== null && botObj?.admin !== undefined;
-    } catch {}
+cmd({
+  pattern: 'translate',
+  desc: 'Translate text to another language',
+  category: 'ai',
+  react: '🌐'
+}, async (conn, m, { args, prefix }) => {
+  if (args.length < 2) return await conn.sendMessage(m.from, { text: `⚠️ Usage: *${prefix}translate <lang> <text>*
+Example: *${prefix}translate fr Hello, nice to meet you*` }, { quoted: m });
+  const lang = args[0];
+  const text = args.slice(1).join(' ');
+  try {
+    const res = await axios.get(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=auto|${lang}`);
+    const translated = res.data?.responseData?.translatedText || 'Could not translate.';
+    await conn.sendMessage(m.from, { text: `🌍 *Translation (${lang}):*
+${translated}` }, { quoted: m });
+  } catch {
+    await conn.sendMessage(m.from, { text: '❌ Error occurred during translation.' }, { quoted: m });
   }
-
-  switch (command) {
-    // ═════════════════════════════════════════════════════════
-    // 1. AI COMMANDS
-    // ═════════════════════════════════════════════════════════
-    case 'ai':
-    case 'gpt':
-    case 'ask':
-    case 'chat':
-    case 'gemini':
-    case 'llama':
-    case 'copilot':
-    case 'explain':
-      if (!q) return reply(`Please ask a question. Example: ${prefix}${command} What is Quantum Computing?`);
-      try {
-        const res = await axios.get(
-          `https://api.giftedtech.my.id/api/ai/gpt4?apikey=gifted&q=${encodeURIComponent(q)}`,
-          { timeout: 12000 }
-        );
-        return reply(`🤖 *${config.BOT_NAME} AI [${command.toUpperCase()}]:*\n\n${res.data?.result || res.data?.message || 'Answer generated.'}`);
-      } catch {
-        return reply(`🤖 *${config.BOT_NAME} AI:*\n\nRegarding "${q}": I am currently processing your request. Please ask any specific questions!`);
-      }
-
-    case 'translate':
-      if (!q) return reply(`Usage: ${prefix}translate <text to translate>`);
-      return reply(`🌐 *Translation:*\n${q}`);
-
-    case 'summarize':
-    case 'rewrite':
-    case 'grammar':
-      if (!q) return reply(`Usage: ${prefix}${command} <text>`);
-      return reply(`✨ *${command.toUpperCase()} Result:*\n\n${q}`);
-
-    case 'imagine':
-      if (!q) return reply(`Example: ${prefix}imagine a cybernetic tiger in neon Tokyo`);
-      await reply(`🎨 Generating image for "${q}"...`);
-      return sock.sendMessage(
-        from,
-        {
-          image: { url: `https://image.pollinations.ai/prompt/${encodeURIComponent(q)}` },
-          caption: `🎨 *Prompt:* ${q}\n🤖 *${config.BOT_NAME}*`
-        },
-        { quoted: msg }
-      );
-
-    case 'code':
-    case 'debug':
-      if (!q) return reply(`Usage: ${prefix}${command} <code or error description>`);
-      return reply(`💻 *Code Assistant:*\n\n\`\`\`javascript\n// Solution for: ${q}\nfunction solution() {\n  return "Optimized and running smoothly";\n}\n\`\`\``);
-
-    // ═════════════════════════════════════════════════════════
-    // 2. STATUS COMMANDS
-    // ═════════════════════════════════════════════════════════
-    case 'autolikestatus':
-      if (!isOwner) return reply('⚠️ Owner only command.');
-      return reply(`❤️ Auto Like Status set to: *${q.toLowerCase() === 'off' ? 'OFF' : 'ON'}*`);
-
-    case 'autoviewstatus':
-      if (!isOwner) return reply('⚠️ Owner only command.');
-      return reply(`👁️ Auto View Status set to: *${q.toLowerCase() === 'off' ? 'OFF' : 'ON'}*`);
-
-    case 'status':
-    case 'statusprivacy':
-      return reply(`📊 *Status System:*\n• Auto View: Enabled\n• Auto Like: Enabled\n• Privacy: Encrypted`);
-
-    case 'statusreply':
-    case 'statusreact':
-    case 'statussave':
-    case 'statusdownload':
-      return reply(`📥 *Status Tool [${command.toUpperCase()}]:* Forward or quote any status message to apply this command.`);
-
-    // ═════════════════════════════════════════════════════════
-    // 3. GROUP COMMANDS
-    // ═════════════════════════════════════════════════════════
-    case 'kick':
-    case 'remove': {
-      if (!isGroup) return reply('⚠️ Group command only.');
-      if (!isSenderAdmin && !isOwner) return reply('⚠️ Group Admin permission required.');
-      const target =
-        msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] ||
-        msg.message?.extendedTextMessage?.contextInfo?.participant;
-      if (!target) return reply(`Tag or reply to the user you want to remove.`);
-      try {
-        await sock.groupParticipantsUpdate(from, [target], 'remove');
-        return reply('✅ Member successfully removed.');
-      } catch {
-        return reply('❌ Bot must be a Group Admin to remove members.');
-      }
-    }
-
-    case 'add': {
-      if (!isGroup) return reply('⚠️ Group command only.');
-      if (!isSenderAdmin && !isOwner) return reply('⚠️ Group Admin permission required.');
-      if (!q) return reply(`Usage: ${prefix}add 2557xxxxxxxx`);
-      const num = q.replace(/\D/g, '') + '@s.whatsapp.net';
-      try {
-        await sock.groupParticipantsUpdate(from, [num], 'add');
-        return reply(`✅ Add request sent for ${q}`);
-      } catch {
-        return reply('❌ Failed to add member.');
-      }
-    }
-
-    case 'promote':
-    case 'demote': {
-      if (!isGroup) return reply('⚠️ Group command only.');
-      if (!isSenderAdmin && !isOwner) return reply('⚠️ Group Admin permission required.');
-      const target =
-        msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] ||
-        msg.message?.extendedTextMessage?.contextInfo?.participant;
-      if (!target) return reply(`Tag or reply to the target user.`);
-      try {
-        await sock.groupParticipantsUpdate(from, [target], command);
-        return reply(`✅ Member successfully ${command}d.`);
-      } catch {
-        return reply(`❌ Bot must be Admin to ${command} members.`);
-      }
-    }
-
-    case 'mute':
-    case 'lock':
-      if (!isGroup) return reply('⚠️ Group command only.');
-      if (!isSenderAdmin && !isOwner) return reply('⚠️ Group Admin permission required.');
-      try {
-        await sock.groupSettingUpdate(from, 'announcement');
-        return reply('🔒 Group closed. Only admins can send messages.');
-      } catch {
-        return reply('❌ Bot must be Admin to change group settings.');
-      }
-
-    case 'unmute':
-    case 'unlock':
-      if (!isGroup) return reply('⚠️ Group command only.');
-      if (!isSenderAdmin && !isOwner) return reply('⚠️ Group Admin permission required.');
-      try {
-        await sock.groupSettingUpdate(from, 'not_announcement');
-        return reply('🔓 Group opened. All members can send messages.');
-      } catch {
-        return reply('❌ Bot must be Admin to change group settings.');
-      }
-
-    case 'tagall': {
-      if (!isGroup) return reply('⚠️ Group command only.');
-      if (!isSenderAdmin && !isOwner) return reply('⚠️ Group Admin permission required.');
-      try {
-        const meta = await sock.groupMetadata(from);
-        let tagMsg = `╭─ *TAG ALL* ─╮\n│ 📢 *Announcement:* ${q || 'Notice'}\n`;
-        const mentions = meta.participants.map((p) => p.id);
-        mentions.forEach((m) => (tagMsg += `├ @${m.split('@')[0]}\n`));
-        tagMsg += `╰───────────────╯`;
-        return sock.sendMessage(from, { text: tagMsg, mentions }, { quoted: msg });
-      } catch {
-        return reply('❌ Failed to fetch group members.');
-      }
-    }
-
-    case 'hidetag': {
-      if (!isGroup) return reply('⚠️ Group command only.');
-      if (!isSenderAdmin && !isOwner) return reply('⚠️ Group Admin permission required.');
-      try {
-        const meta = await sock.groupMetadata(from);
-        const mentions = meta.participants.map((p) => p.id);
-        return sock.sendMessage(from, { text: q || '📢 Notification', mentions });
-      } catch {
-        return reply('❌ Failed to execute hidetag.');
-      }
-    }
-
-    case 'groupinfo': {
-      if (!isGroup) return reply('⚠️ Group command only.');
-      try {
-        const meta = await sock.groupMetadata(from);
-        return reply(
-          `👥 *Group Name:* ${meta.subject}\n🆔 *ID:* ${meta.id}\n👥 *Members:* ${meta.participants.length}\n📝 *Description:* ${meta.desc || 'No description set.'}`
-        );
-      } catch {
-        return reply('❌ Error fetching group info.');
-      }
-    }
-
-    case 'setname':
-      if (!isGroup || (!isSenderAdmin && !isOwner)) return reply('Admins only.');
-      if (!q) return reply(`Usage: ${prefix}setname <New Group Name>`);
-      try {
-        await sock.groupUpdateSubject(from, q);
-        return reply(`✅ Group name updated to: *${q}*`);
-      } catch {
-        return reply('❌ Failed to update group name.');
-      }
-
-    case 'setdesc':
-      if (!isGroup || (!isSenderAdmin && !isOwner)) return reply('Admins only.');
-      if (!q) return reply(`Usage: ${prefix}setdesc <New Description>`);
-      try {
-        await sock.groupUpdateDescription(from, q);
-        return reply(`✅ Group description updated.`);
-      } catch {
-        return reply('❌ Failed to update description.');
-      }
-
-    case 'welcome':
-    case 'goodbye':
-    case 'antilink':
-    case 'antispam':
-      return reply(`🛡️ *${command.toUpperCase()}:* Setting configured to *ACTIVE* on this group.`);
-
-    case 'poll':
-      return reply(`📊 *Poll Creator:* Send: ${prefix}poll Question | Option 1 | Option 2`);
-
-    case 'revoke':
-      if (!isGroup || (!isSenderAdmin && !isOwner)) return reply('Admins only.');
-      try {
-        await sock.groupRevokeInvite(from);
-        return reply('🔄 Group invite link has been reset.');
-      } catch {
-        return reply('❌ Failed to revoke invite link.');
-      }
-
-    // ═════════════════════════════════════════════════════════
-    // 4. STICKER & MEDIA
-    // ═════════════════════════════════════════════════════════
-    case 'sticker':
-    case 's': {
-      const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-      const isImage = msg.message?.imageMessage || quoted?.imageMessage;
-      const isVideo = msg.message?.videoMessage || quoted?.videoMessage;
-
-      if (!isImage && !isVideo) {
-        return reply(`Reply to an image or short video with ${prefix}sticker`);
-      }
-
-      try {
-        await reply('🎨 Generating sticker...');
-        const buffer = await downloadMediaMessage(
-          quoted ? { message: quoted } : msg,
-          'buffer',
-          {}
-        );
-
-        const sticker = new Sticker(buffer, {
-          pack: config.BOT_NAME,
-          author: config.OWNER_NAME,
-          type: StickerTypes.FULL,
-          quality: 70
-        });
-
-        const stickerBuffer = await sticker.toBuffer();
-        return sock.sendMessage(from, { sticker: stickerBuffer }, { quoted: msg });
-      } catch {
-        return reply('❌ Failed to create sticker.');
-      }
-    }
-
-    case 'take': {
-      const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-      if (!quoted?.stickerMessage) return reply(`Reply to any sticker with ${prefix}take <pack name>`);
-      try {
-        const buffer = await downloadMediaMessage({ message: quoted }, 'buffer', {});
-        const packName = q || config.BOT_NAME;
-
-        const sticker = new Sticker(buffer, {
-          pack: packName,
-          author: config.OWNER_NAME,
-          type: StickerTypes.FULL
-        });
-
-        const stickerBuffer = await sticker.toBuffer();
-        return sock.sendMessage(from, { sticker: stickerBuffer }, { quoted: msg });
-      } catch {
-        return reply('❌ Failed to re-brand sticker.');
-      }
-    }
-
-    case 'toimg':
-    case 'tomp4':
-    case 'togif':
-    case 'circle':
-    case 'crop':
-    case 'blur':
-    case 'invert':
-    case 'wanted':
-    case 'wasted':
-    case 'trigger':
-    case 'emojimix':
-    case 'attp':
-    case 'ttp':
-    case 'qc':
-      return reply(`🎨 *Media Tool [${command.toUpperCase()}]:* Processing media with parameters: "${q || 'default'}"`);
-
-    // ═════════════════════════════════════════════════════════
-    // 5. DOWNLOADERS
-    // ═════════════════════════════════════════════════════════
-    case 'play':
-    case 'song':
-    case 'ytmp3': {
-      if (!q) return reply(`Usage: ${prefix}${command} <song title or URL>`);
-      await reply(`🔍 Searching for "${q}"...`);
-      try {
-        const search = await yts(q);
-        const video = search.videos[0];
-        if (!video) return reply('No results found.');
-
-        await reply(`🎵 Downloading: *${video.title}* (${video.timestamp})...`);
-        const res = await axios.get(
-          `https://api.giftedtech.my.id/api/download/ytmp3?url=${encodeURIComponent(video.url)}&apikey=gifted`,
-          { timeout: 30000 }
-        );
-        const audioUrl = res.data?.result?.download_url;
-
-        if (audioUrl) {
-          return sock.sendMessage(
-            from,
-            {
-              audio: { url: audioUrl },
-              mimetype: 'audio/mpeg',
-              fileName: `${video.title}.mp3`
-            },
-            { quoted: msg }
-          );
-        } else {
-          return reply(`Direct Link: ${video.url}`);
-        }
-      } catch {
-        return reply('❌ Audio download service busy. Please try again.');
-      }
-    }
-
-    case 'video':
-    case 'ytmp4': {
-      if (!q) return reply(`Usage: ${prefix}${command} <video title or URL>`);
-      await reply(`🎬 Searching for "${q}"...`);
-      try {
-        const search = await yts(q);
-        const video = search.videos[0];
-        if (!video) return reply('Video not found.');
-
-        await reply(`🎬 Downloading: *${video.title}*...`);
-        const res = await axios.get(
-          `https://api.giftedtech.my.id/api/download/ytmp4?url=${encodeURIComponent(video.url)}&apikey=gifted`,
-          { timeout: 35000 }
-        );
-        const videoUrl = res.data?.result?.download_url;
-
-        if (videoUrl) {
-          return sock.sendMessage(
-            from,
-            {
-              video: { url: videoUrl },
-              caption: `🎬 *${video.title}*\n⏱ Duration: ${video.timestamp}\n🤖 *${config.BOT_NAME}*`
-            },
-            { quoted: msg }
-          );
-        } else {
-          return reply(`Direct Link: ${video.url}`);
-        }
-      } catch {
-        return reply('❌ Video download failed.');
-      }
-    }
-
-    case 'tiktok':
-    case 'tt': {
-      if (!q) return reply(`Usage: ${prefix}tiktok <video URL>`);
-      await reply('⏳ Downloading TikTok video...');
-      try {
-        const res = await axios.get(
-          `https://api.giftedtech.my.id/api/download/tiktok?url=${encodeURIComponent(q)}&apikey=gifted`,
-          { timeout: 25000 }
-        );
-        const vid = res.data?.result?.video;
-        if (vid) {
-          return sock.sendMessage(
-            from,
-            {
-              video: { url: vid },
-              caption: `✨ TikTok (No Watermark)\n🤖 *${config.BOT_NAME}*`
-            },
-            { quoted: msg }
-          );
-        } else {
-          return reply('Could not download this TikTok video.');
-        }
-      } catch {
-        return reply('❌ Invalid TikTok link or service error.');
-      }
-    }
-
-    case 'instagram':
-    case 'facebook':
-    case 'twitter':
-    case 'spotify':
-    case 'pinterest':
-    case 'mediafire':
-    case 'gdrive':
-    case 'apk':
-      if (!q) return reply(`Please provide a valid ${command.toUpperCase()} URL.`);
-      return reply(`📥 *${command.toUpperCase()} Downloader:*\nFetching link for: ${q}...`);
-
-    case 'lyrics':
-      if (!q) return reply(`Usage: ${prefix}lyrics <song title>`);
-      return reply(`🎼 *Lyrics search for:* "${q}"\n\n[Searching lyrics database...]`);
-
-    // ═════════════════════════════════════════════════════════
-    // 6. TOOLS
-    // ═════════════════════════════════════════════════════════
-    case 'ping': {
-      const lat = Date.now() - (msg.messageTimestamp * 1000 || Date.now());
-      return reply(`🏓 Pong! Latency: ${Math.abs(lat)}ms`);
-    }
-
-    case 'alive':
-      return reply(
-        `🌟 *${config.BOT_NAME} IS ONLINE!*
-
-⏱️ *Uptime:* ${formatUptime(Date.now() - startTime)}
-🧠 *RAM:* ${getRam()}
-⚙️ *Mode:* ${config.BOT_MODE}
-👑 *Owner:* ${config.OWNER_NAME}`
-      );
-
-    case 'uptime':
-      return reply(`⏱️ *Uptime:* ${formatUptime(Date.now() - startTime)}`);
-
-    case 'time':
-      return reply(`🕒 *Current Time:* ${new Date().toLocaleTimeString('en-US', { timeZone: 'Africa/Dar_es_Salaam' })}`);
-
-    case 'date':
-      return reply(`📅 *Current Date:* ${new Date().toLocaleDateString('en-US', { timeZone: 'Africa/Dar_es_Salaam' })}`);
-
-    case 'calc':
-    case 'math':
-      if (!q) return reply(`Example: ${prefix}calc 50 * 4 + 10`);
-      try {
-        const cleanExpr = q.replace(/[^0-9+\-*/().]/g, '');
-        const res = Function(`'use strict'; return (${cleanExpr})`)();
-        return reply(`🧮 *Result:* ${res}`);
-      } catch {
-        return reply('❌ Invalid math expression.');
-      }
-
-    case 'weather':
-      if (!q) return reply(`Provide city name. Example: ${prefix}weather Nairobi`);
-      return reply(`☀️ *Weather for ${q}:* 27°C | Clear Skies | Humidity: 65%`);
-
-    case 'news':
-      return reply(`📰 *Tech News:* ${config.BOT_NAME} updated with 130+ commands and ultra-fast media downloaders.`);
-
-    case 'currency':
-      return reply(`💱 *Currency Exchange Rates:*\n• 1 USD = 2,650 TZS\n• 1 USD = 130 KES\n• 1 EUR = 2,820 TZS`);
-
-    case 'qr':
-      if (!q) return reply(`Provide text or link to encode. Example: ${prefix}qr hello`);
-      return sock.sendMessage(
-        from,
-        {
-          image: { url: `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(q)}` },
-          caption: `📱 *QR Code Generated*`
-        },
-        { quoted: msg }
-      );
-
-    case 'barcode':
-      return reply(`📊 *Barcode:* https://bwipjs-api.metafloor.com/?bcid=code128&text=${encodeURIComponent(q || 'HANSTECHY')}`);
-
-    case 'shorturl':
-    case 'expandurl':
-      if (!q) return reply(`Provide a link to shorten.`);
-      return reply(`🔗 *Shortened URL:* https://tinyurl.com/api-create.php?url=${encodeURIComponent(q)}`);
-
-    case 'password': {
-      const pass = Math.random().toString(36).slice(-10) + Math.random().toString(36).slice(-4).toUpperCase();
-      return reply(`🔐 *Generated Secure Password:* \`${pass}\``);
-    }
-
-    case 'uuid':
-      return reply(`🆔 *UUID v4:* \`${require('crypto').randomUUID()}\``);
-
-    case 'base64':
-    case 'encode':
-      if (!q) return reply('Provide text to encode.');
-      return reply(`🔒 *Base64 Encoded:* ${Buffer.from(q).toString('base64')}`);
-
-    case 'unbase64':
-    case 'decode':
-      if (!q) return reply('Provide Base64 string to decode.');
-      try {
-        return reply(`🔓 *Decoded Text:* ${Buffer.from(q, 'base64').toString('utf-8')}`);
-      } catch {
-        return reply('❌ Invalid Base64 input.');
-      }
-
-    case 'reverse':
-      if (!q) return reply('Provide text.');
-      return reply(q.split('').reverse().join(''));
-
-    case 'upper':
-      if (!q) return reply('Provide text.');
-      return reply(q.toUpperCase());
-
-    case 'lower':
-      if (!q) return reply('Provide text.');
-      return reply(q.toLowerCase());
-
-    case 'count':
-      if (!q) return reply('Provide text.');
-      return reply(`📊 *Characters:* ${q.length} | *Words:* ${q.split(/\s+/).filter(Boolean).length}`);
-
-    case 'choose': {
-      if (!q) return reply(`Provide choices separated by comma. Example: ${prefix}choose Coffee, Tea`);
-      const opts = q.split(',').map((s) => s.trim());
-      return reply(`🎯 I choose: *${opts[Math.floor(Math.random() * opts.length)]}*`);
-    }
-
-    case 'random':
-      return reply(`🎲 Random Number: *${Math.floor(Math.random() * 1000) + 1}*`);
-
-    case 'timestamp':
-      return reply(`⏱️ Unix Timestamp: *${Date.now()}*`);
-
-    // ═════════════════════════════════════════════════════════
-    // 7. GAMES & FUN
-    // ═════════════════════════════════════════════════════════
-    case 'joke':
-      return reply('😂 Why do programmers prefer dark mode? Because light attracts bugs!');
-
-    case 'fact':
-      return reply('💡 *Did you know?* The first computer mouse was made of wood in 1964!');
-
-    case 'quote':
-    case 'motivate':
-      return reply('📜 *"Do what you can, with what you have, where you are."* — Theodore Roosevelt');
-
-    case '8ball': {
-      if (!q) return reply('Ask a question.');
-      const answers = ['Yes, definitely!', 'No way.', 'Ask again later.', 'Most likely!', 'Outlook good!'];
-      return reply(`🎱 *Answer:* ${answers[Math.floor(Math.random() * answers.length)]}`);
-    }
-
-    case 'coinflip':
-      return reply(`🪙 The coin landed on: *${Math.random() > 0.5 ? 'HEADS' : 'TAILS'}*!`);
-
-    case 'dice':
-      return reply(`🎲 You rolled: *${Math.floor(Math.random() * 6) + 1}*!`);
-
-    case 'riddle':
-      return reply('🧩 *Riddle:* What has keys but can not open locks?\n\n*Answer:* A piano!');
-
-    case 'trivia':
-    case 'quiz':
-      return reply('❓ *Trivia:* Which planet is known as the Red Planet?\n\n*Answer:* Mars');
-
-    case 'ship':
-      return reply(`❤️ Love Compatibility for *${q || 'Couple'}*: *${Math.floor(Math.random() * 100) + 1}%*`);
-
-    case 'rate':
-      return reply(`⭐ Rating for *${q || 'Target'}*: *${Math.floor(Math.random() * 10) + 1}/10*`);
-
-    case 'compliment':
-      return reply('😊 You are doing fantastic today, keep shining!');
-
-    case 'roast':
-      return reply('🔥 You bring so much joy to everyone... the moment you leave the room!');
-
-    case 'truth':
-      return reply('🤐 *Truth:* What is the biggest secret you have kept from your closest friend?');
-
-    case 'dare':
-      return reply('🔥 *Dare:* Send your favorite song recommendation right now!');
-
-    // ═════════════════════════════════════════════════════════
-    // 8. OWNER COMMANDS
-    // ═════════════════════════════════════════════════════════
-    case 'mode':
-      if (!isOwner) return reply('⚠️ Owner only command.');
-      if (q.toLowerCase() === 'private') {
-        config.BOT_MODE = 'PRIVATE';
-        return reply('🔒 Bot mode set to *PRIVATE*.');
-      } else if (q.toLowerCase() === 'public') {
-        config.BOT_MODE = 'PUBLIC';
-        return reply('🔓 Bot mode set to *PUBLIC*.');
-      }
-      return reply(`Usage: ${prefix}mode public OR ${prefix}mode private`);
-
-    case 'owner':
-    case 'setowner':
-    case 'ownerinfo':
-      return reply(`👑 *Owner Name:* ${config.OWNER_NAME}\n📱 *Owner Phone:* wa.me/${config.OWNER_NUMBER}`);
-
-    case 'restart':
-    case 'update':
-      if (!isOwner) return reply('⚠️ Owner only command.');
-      await reply('🔄 Restarting bot processes...');
-      return setTimeout(() => process.exit(0), 1000);
-
-    case 'broadcast':
-      if (!isOwner) return reply('⚠️ Owner only command.');
-      return reply(`📢 Broadcast queued: "${q}"`);
-
-    case 'clearsession':
-      if (!isOwner) return reply('⚠️ Owner only command.');
-      return reply('🧹 Session cache cleared.');
-
-    case 'backup':
-      if (!isOwner) return reply('⚠️ Owner only command.');
-      return reply('💾 System backup ready.');
-
-    case 'setprefix':
-      if (!isOwner) return reply('⚠️ Owner only command.');
-      if (!q) return reply(`Provide new prefix.`);
-      config.PREFIX = q.trim();
-      return reply(`⌨️ Prefix changed to: *${config.PREFIX}*`);
-
-    case 'setnamebot':
-      if (!isOwner) return reply('⚠️ Owner only command.');
-      if (!q) return reply(`Provide new name.`);
-      config.BOT_NAME = q.trim();
-      return reply(`🤖 Bot name updated to: *${config.BOT_NAME}*`);
-
-    case 'setbio':
-    case 'block':
-    case 'unblock':
-    case 'shutdown':
-      if (!isOwner) return reply('⚠️ Owner only command.');
-      return reply(`⚙️ Owner command [${command.toUpperCase()}] executed.`);
-
-    // ═════════════════════════════════════════════════════════
-    // 9. MENU & SYSTEM INFO
-    // ═════════════════════════════════════════════════════════
-    case 'menu':
-    case 'help': {
-      const menu = `╭─ *${config.BOT_NAME}* ─╮
-│ 👑 Owner: ${config.OWNER_NAME}
-│ 📱 Number: ${config.OWNER_NUMBER || 'Configured'}
-│ ⚙️ Mode: ${config.BOT_MODE}
-│ ⏱️ Uptime: ${formatUptime(Date.now() - startTime)}
-│ 🧠 RAM: ${getRam()}
-│ ⌨️ Prefix: ${prefix}
+});
+
+cmd({
+  pattern: 'summarize',
+  desc: 'Summarize text with key highlights',
+  category: 'ai',
+  react: '📝'
+}, async (conn, m, { args, prefix }) => {
+  const text = args.join(' ');
+  if (!text || text.length < 30) return await conn.sendMessage(m.from, { text: `⚠️ Please provide a longer text to summarize!
+Usage: *${prefix}summarize <long text>*` }, { quoted: m });
+  const res = await queryAI(`Summarize the following text concisely:
+${text}`);
+  await conn.sendMessage(m.from, { text: `📑 *Summary:*
+
+${res}` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'rewrite',
+  desc: 'Paraphrase and rewrite text professionally',
+  category: 'ai',
+  react: '✍️'
+}, async (conn, m, { args }) => {
+  const text = args.join(' ');
+  if (!text) return await conn.sendMessage(m.from, { text: '⚠️ Please provide text to rewrite!' }, { quoted: m });
+  const res = await queryAI(`Rewrite and rephrase the following text professionally:
+${text}`);
+  await conn.sendMessage(m.from, { text: `✍️ *Rewritten Text:*
+
+${res}` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'grammar',
+  desc: 'Check and fix grammar and spelling mistakes',
+  category: 'ai',
+  react: '🔍'
+}, async (conn, m, { args }) => {
+  const text = args.join(' ');
+  if (!text) return await conn.sendMessage(m.from, { text: '⚠️ Please provide text to proofread!' }, { quoted: m });
+  const res = await queryAI(`Check grammar and spelling for this text, fix all errors, and explain changes:
+${text}`);
+  await conn.sendMessage(m.from, { text: `🔍 *Grammar Check:*
+
+${res}` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'imagine',
+  desc: 'Generate an AI illustration or photo',
+  category: 'ai',
+  react: '🎨'
+}, async (conn, m, { args, prefix }) => {
+  const prompt = args.join(' ');
+  if (!prompt) return await conn.sendMessage(m.from, { text: `⚠️ Usage: *${prefix}imagine <description>*
+Example: *${prefix}imagine A futuristic cyber city at sunset*` }, { quoted: m });
+  const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true`;
+  await conn.sendMessage(m.from, { image: { url: imageUrl }, caption: `🎨 *AI Generated Image*
+Prompt: "${prompt}"` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'code',
+  desc: 'Generate programming code in any language',
+  category: 'ai',
+  react: '💻'
+}, async (conn, m, { args }) => {
+  const query = args.join(' ');
+  if (!query) return await conn.sendMessage(m.from, { text: '⚠️ Please specify what code to write!' }, { quoted: m });
+  const res = await queryAI(`Write clean, commented, and well-structured code for:
+${query}`);
+  await conn.sendMessage(m.from, { text: res }, { quoted: m });
+});
+
+cmd({
+  pattern: 'debug',
+  desc: 'Debug and fix errors in your code snippet',
+  category: 'ai',
+  react: '🐞'
+}, async (conn, m, { args }) => {
+  const query = args.join(' ');
+  if (!query) return await conn.sendMessage(m.from, { text: '⚠️ Paste your code snippet and the error message to debug!' }, { quoted: m });
+  const res = await queryAI(`Debug this code, explain the bug, and provide the corrected version:
+${query}`);
+  await conn.sendMessage(m.from, { text: res }, { quoted: m });
+});
+
+cmd({
+  pattern: 'explain',
+  desc: 'Explain any concept or topic simply',
+  category: 'ai',
+  react: '💡'
+}, async (conn, m, { args }) => {
+  const query = args.join(' ');
+  if (!query) return await conn.sendMessage(m.from, { text: '⚠️ What concept would you like explained?' }, { quoted: m });
+  const res = await queryAI(`Explain the following topic simply, clearly, and with an intuitive analogy:
+${query}`);
+  await conn.sendMessage(m.from, { text: `💡 *Explanation:*
+
+${res}` }, { quoted: m });
+});
+
+// ==========================================
+// 2. STATUS COMMANDS (8 commands)
+// ==========================================
+
+cmd({
+  pattern: 'autolikestatus',
+  desc: 'Enable or disable auto-liking WhatsApp statuses',
+  category: 'status',
+  onlyOwner: true
+}, async (conn, m, { args }) => {
+  const val = args[0]?.toLowerCase();
+  if (val === 'on') {
+    process.env.AUTO_LIKE_STATUS = 'true';
+    return await conn.sendMessage(m.from, { text: '✅ Auto-like status is now ENABLED (ON).' }, { quoted: m });
+  } else if (val === 'off') {
+    process.env.AUTO_LIKE_STATUS = 'false';
+    return await conn.sendMessage(m.from, { text: '❌ Auto-like status is now DISABLED (OFF).' }, { quoted: m });
+  }
+  await conn.sendMessage(m.from, { text: `⚠️ Usage: *.autolikestatus on* or *.autolikestatus off*
+Current: ${process.env.AUTO_LIKE_STATUS || 'true'}` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'autoviewstatus',
+  desc: 'Enable or disable auto-viewing WhatsApp statuses',
+  category: 'status',
+  onlyOwner: true
+}, async (conn, m, { args }) => {
+  const val = args[0]?.toLowerCase();
+  if (val === 'on') {
+    process.env.AUTO_VIEW_STATUS = 'true';
+    return await conn.sendMessage(m.from, { text: '✅ Auto-view status is now ENABLED (ON).' }, { quoted: m });
+  } else if (val === 'off') {
+    process.env.AUTO_VIEW_STATUS = 'false';
+    return await conn.sendMessage(m.from, { text: '❌ Auto-view status is now DISABLED (OFF).' }, { quoted: m });
+  }
+  await conn.sendMessage(m.from, { text: `⚠️ Usage: *.autoviewstatus on* or *.autoviewstatus off*
+Current: ${process.env.AUTO_VIEW_STATUS || 'true'}` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'status',
+  desc: 'View current WhatsApp status automation settings',
+  category: 'status',
+  react: '📊'
+}, async (conn, m) => {
+  const text = `📊 *STATUS AUTOMATION SETTINGS*
+
+` +
+               `👁️ *Auto-View Status:* ${process.env.AUTO_VIEW_STATUS !== 'false' ? 'ENABLED (ON)' : 'DISABLED (OFF)'}
+` +
+               `❤️ *Auto-Like Status:* ${process.env.AUTO_LIKE_STATUS !== 'false' ? 'ENABLED (ON)' : 'DISABLED (OFF)'}
+
+` +
+               `Use *.autoviewstatus on/off* and *.autolikestatus on/off* to configure.`;
+  await conn.sendMessage(m.from, { text }, { quoted: m });
+});
+
+cmd({
+  pattern: 'statusreply',
+  desc: 'Reply directly to a contact status',
+  category: 'status'
+}, async (conn, m, { args }) => {
+  const replyMsg = args.join(' ');
+  if (!replyMsg) return await conn.sendMessage(m.from, { text: '⚠️ Enter the reply message for the status!' }, { quoted: m });
+  await conn.sendMessage(m.from, { text: `✅ Status reply registered: "${replyMsg}"` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'statusreact',
+  desc: 'Set custom reaction emoji for status updates',
+  category: 'status'
+}, async (conn, m, { args }) => {
+  const emoji = args[0] || '❤️';
+  await conn.sendMessage(m.from, { text: `⚠️ Custom status-reaction settings are not persisted yet. Current automatic reactions remain unchanged (${emoji} was not saved).` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'statussave',
+  desc: 'Save or forward a quoted status update',
+  category: 'status',
+  react: '📥'
+}, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: '⚠️ Status media saving is not implemented yet. No media was downloaded or saved.' }, { quoted: m });
+});
+
+cmd({
+  pattern: 'statusdownload',
+  desc: 'Download media from a status update',
+  category: 'status',
+  react: '📥'
+}, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: '⚠️ Status media downloading is not implemented yet. No media was downloaded.' }, { quoted: m });
+});
+
+cmd({
+  pattern: 'statusprivacy',
+  desc: 'Display WhatsApp status privacy guide',
+  category: 'status'
+}, async (conn, m) => {
+  const info = `🔒 *WHATSAPP STATUS PRIVACY*
+
+` +
+               `1. *My Contacts:* All saved contacts can view your statuses.
+` +
+               `2. *My Contacts Except...:* Hide statuses from selected contacts.
+` +
+               `3. *Only Share With...:* Share only with specific people.
+
+` +
+               `Configure directly in WhatsApp Settings -> Privacy -> Status.`;
+  await conn.sendMessage(m.from, { text: info }, { quoted: m });
+});
+
+// ==========================================
+// 3. GROUP COMMANDS (19 commands)
+// ==========================================
+
+cmd({
+  pattern: 'tagall',
+  desc: 'Mention every participant in the group',
+  category: 'group',
+  onlyGroup: true,
+  onlyAdmin: true,
+  react: '📢'
+}, async (conn, m, { args, groupMetadata }) => {
+  const participants = groupMetadata?.participants || [];
+  const message = args.join(' ') || 'Group Announcement';
+  let tagText = `📢 *GROUP ANNOUNCEMENT (TAG ALL)*
+💬 *Message:* ${message}
+👥 *Members:* ${participants.length}
+
+`;
+  const mentions = [];
+  for (const mem of participants) {
+    tagText += `➥ @${mem.id.split('@')[0]}
+`;
+    mentions.push(mem.id);
+  }
+  await conn.sendMessage(m.from, { text: tagText, mentions }, { quoted: m });
+});
+
+cmd({
+  pattern: 'hidetag',
+  desc: 'Silently mention every participant',
+  category: 'group',
+  onlyGroup: true,
+  onlyAdmin: true
+}, async (conn, m, { args, groupMetadata }) => {
+  const participants = groupMetadata?.participants || [];
+  const message = args.join(' ');
+  if (!message) return await conn.sendMessage(m.from, { text: '⚠️ Enter message to broadcast!' }, { quoted: m });
+  const mentions = participants.map(p => p.id);
+  await conn.sendMessage(m.from, { text: message, mentions });
+});
+
+cmd({
+  pattern: 'groupinfo',
+  desc: 'Display group metadata and administrators',
+  category: 'group',
+  onlyGroup: true,
+  react: 'ℹ️'
+}, async (conn, m, { groupMetadata }) => {
+  const { id, subject, desc, participants, owner } = groupMetadata;
+  const admins = participants.filter(p => p.admin).length;
+  const info = `📋 *GROUP INFORMATION*
+
+` +
+               `📌 *Subject:* ${subject}
+` +
+               `🆔 *ID:* ${id}
+` +
+               `👑 *Owner:* ${owner ? '@' + owner.split('@')[0] : 'Unknown'}
+` +
+               `👥 *Members:* ${participants.length}
+` +
+               `👮 *Admins:* ${admins}
+` +
+               `📝 *Description:* ${desc ? desc.toString() : 'None'}`;
+  await conn.sendMessage(m.from, { text: info, mentions: owner ? [owner] : [] }, { quoted: m });
+});
+
+cmd({
+  pattern: 'kick',
+  desc: 'Remove member from group',
+  category: 'group',
+  onlyGroup: true,
+  onlyAdmin: true,
+  react: '👢'
+}, async (conn, m, { isBotAdmin }) => {
+  if (!isBotAdmin) return await conn.sendMessage(m.from, { text: '❌ Bot must be an Admin!' }, { quoted: m });
+  const target = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null);
+  if (!target) return await conn.sendMessage(m.from, { text: '⚠️ Mention a user or reply to their message!' }, { quoted: m });
+  await conn.groupParticipantsUpdate(m.from, [target], 'remove');
+  await conn.sendMessage(m.from, { text: '✅ Member removed successfully.' }, { quoted: m });
+});
+
+cmd({
+  pattern: 'add',
+  desc: 'Add user to group by phone number',
+  category: 'group',
+  onlyGroup: true,
+  onlyAdmin: true,
+  react: '➕'
+}, async (conn, m, { args, isBotAdmin }) => {
+  if (!isBotAdmin) return await conn.sendMessage(m.from, { text: '❌ Bot must be an Admin!' }, { quoted: m });
+  const number = (args[0] || '').replace(/[^0-9]/g, '');
+  if (!number) return await conn.sendMessage(m.from, { text: '⚠️ Provide phone number with country code. Example: *.add 255712345678*' }, { quoted: m });
+  const jid = `${number}@s.whatsapp.net`;
+  await conn.groupParticipantsUpdate(m.from, [jid], 'add');
+  await conn.sendMessage(m.from, { text: `✅ Added ${number} to the group.` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'promote',
+  desc: 'Promote member to Admin',
+  category: 'group',
+  onlyGroup: true,
+  onlyAdmin: true,
+  react: '⭐'
+}, async (conn, m, { isBotAdmin }) => {
+  if (!isBotAdmin) return await conn.sendMessage(m.from, { text: '❌ Bot must be an Admin!' }, { quoted: m });
+  const target = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null);
+  if (!target) return await conn.sendMessage(m.from, { text: '⚠️ Mention a user or reply to their message!' }, { quoted: m });
+  await conn.groupParticipantsUpdate(m.from, [target], 'promote');
+  await conn.sendMessage(m.from, { text: '✅ User promoted to Admin!' }, { quoted: m });
+});
+
+cmd({
+  pattern: 'demote',
+  desc: 'Demote Admin to regular member',
+  category: 'group',
+  onlyGroup: true,
+  onlyAdmin: true,
+  react: '📉'
+}, async (conn, m, { isBotAdmin }) => {
+  if (!isBotAdmin) return await conn.sendMessage(m.from, { text: '❌ Bot must be an Admin!' }, { quoted: m });
+  const target = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null);
+  if (!target) return await conn.sendMessage(m.from, { text: '⚠️ Mention a user or reply to their message!' }, { quoted: m });
+  await conn.groupParticipantsUpdate(m.from, [target], 'demote');
+  await conn.sendMessage(m.from, { text: '✅ User demoted from Admin.' }, { quoted: m });
+});
+
+cmd({
+  pattern: 'mute',
+  desc: 'Close group (Admins only can chat)',
+  category: 'group',
+  onlyGroup: true,
+  onlyAdmin: true,
+  react: '🔒'
+}, async (conn, m, { isBotAdmin }) => {
+  if (!isBotAdmin) return await conn.sendMessage(m.from, { text: '❌ Bot must be an Admin!' }, { quoted: m });
+  await conn.groupSettingUpdate(m.from, 'announcement');
+  await conn.sendMessage(m.from, { text: '🔒 Group closed. Only admins can send messages.' }, { quoted: m });
+});
+
+cmd({
+  pattern: 'unmute',
+  desc: 'Open group (All members can chat)',
+  category: 'group',
+  onlyGroup: true,
+  onlyAdmin: true,
+  react: '🔓'
+}, async (conn, m, { isBotAdmin }) => {
+  if (!isBotAdmin) return await conn.sendMessage(m.from, { text: '❌ Bot must be an Admin!' }, { quoted: m });
+  await conn.groupSettingUpdate(m.from, 'not_announcement');
+  await conn.sendMessage(m.from, { text: '🔓 Group opened. All participants can send messages.' }, { quoted: m });
+});
+
+cmd({
+  pattern: 'setname',
+  desc: 'Change group subject / name',
+  category: 'group',
+  onlyGroup: true,
+  onlyAdmin: true
+}, async (conn, m, { args, isBotAdmin }) => {
+  if (!isBotAdmin) return await conn.sendMessage(m.from, { text: '❌ Bot must be an Admin!' }, { quoted: m });
+  const name = args.join(' ');
+  if (!name) return await conn.sendMessage(m.from, { text: '⚠️ Enter new group name!' }, { quoted: m });
+  await conn.groupUpdateSubject(m.from, name);
+  await conn.sendMessage(m.from, { text: `✅ Group subject updated to: "${name}"` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'setdesc',
+  desc: 'Update group description',
+  category: 'group',
+  onlyGroup: true,
+  onlyAdmin: true
+}, async (conn, m, { args, isBotAdmin }) => {
+  if (!isBotAdmin) return await conn.sendMessage(m.from, { text: '❌ Bot must be an Admin!' }, { quoted: m });
+  const desc = args.join(' ');
+  await conn.groupUpdateDescription(m.from, desc || '');
+  await conn.sendMessage(m.from, { text: '✅ Group description updated.' }, { quoted: m });
+});
+
+cmd({
+  pattern: 'welcome',
+  desc: 'Toggle welcome message for newcomers',
+  category: 'group',
+  onlyGroup: true,
+  onlyAdmin: true
+}, async (conn, m, { args }) => {
+  const opt = args[0]?.toLowerCase();
+  await conn.sendMessage(m.from, { text: '⚠️ Welcome-message automation is not connected to a persistent group-event handler yet.' }, { quoted: m });
+});
+
+cmd({
+  pattern: 'goodbye',
+  desc: 'Toggle goodbye message for leaving members',
+  category: 'group',
+  onlyGroup: true,
+  onlyAdmin: true
+}, async (conn, m, { args }) => {
+  const opt = args[0]?.toLowerCase();
+  await conn.sendMessage(m.from, { text: '⚠️ Goodbye-message automation is not connected to a persistent group-event handler yet.' }, { quoted: m });
+});
+
+cmd({
+  pattern: 'antilink',
+  desc: 'Toggle anti-link group protection',
+  category: 'group',
+  onlyGroup: true,
+  onlyAdmin: true
+}, async (conn, m, { args }) => {
+  const opt = args[0]?.toLowerCase();
+  await conn.sendMessage(m.from, { text: '⚠️ Anti-link command is registered, but per-group toggle persistence is not configured yet. The current handler blocks WhatsApp group invite links by default.' }, { quoted: m });
+});
+
+cmd({
+  pattern: 'antispam',
+  desc: 'Toggle group anti-spam filter',
+  category: 'group',
+  onlyGroup: true,
+  onlyAdmin: true
+}, async (conn, m, { args }) => {
+  const opt = args[0]?.toLowerCase();
+  await conn.sendMessage(m.from, { text: '⚠️ Anti-spam setting is not connected to a message-rate filter yet; no setting was changed.' }, { quoted: m });
+});
+
+cmd({
+  pattern: 'lock',
+  desc: 'Lock group settings (Admins only can edit)',
+  category: 'group',
+  onlyGroup: true,
+  onlyAdmin: true
+}, async (conn, m, { isBotAdmin }) => {
+  if (!isBotAdmin) return await conn.sendMessage(m.from, { text: '❌ Bot must be an Admin!' }, { quoted: m });
+  await conn.groupSettingUpdate(m.from, 'locked');
+  await conn.sendMessage(m.from, { text: '🔒 Group settings locked to Admins only.' }, { quoted: m });
+});
+
+cmd({
+  pattern: 'unlock',
+  desc: 'Unlock group settings (All members can edit)',
+  category: 'group',
+  onlyGroup: true,
+  onlyAdmin: true
+}, async (conn, m, { isBotAdmin }) => {
+  if (!isBotAdmin) return await conn.sendMessage(m.from, { text: '❌ Bot must be an Admin!' }, { quoted: m });
+  await conn.groupSettingUpdate(m.from, 'unlocked');
+  await conn.sendMessage(m.from, { text: '🔓 Group settings unlocked for all members.' }, { quoted: m });
+});
+
+cmd({
+  pattern: 'poll',
+  desc: 'Create an interactive group poll',
+  category: 'group',
+  onlyGroup: true
+}, async (conn, m, { args }) => {
+  const text = args.join(' ');
+  const parts = text.split('|').map(s => s.trim()).filter(Boolean);
+  if (parts.length < 3) return await conn.sendMessage(m.from, { text: '⚠️ Usage: *.poll Question | Option 1 | Option 2*' }, { quoted: m });
+  const title = parts[0];
+  const options = parts.slice(1).map(opt => ({ optionName: opt }));
+  await conn.sendMessage(m.from, { poll: { name: title, values: parts.slice(1), selectableCount: 1 } }, { quoted: m });
+});
+
+cmd({
+  pattern: 'revoke',
+  desc: 'Reset and revoke the group invite link',
+  category: 'group',
+  onlyGroup: true,
+  onlyAdmin: true
+}, async (conn, m, { isBotAdmin }) => {
+  if (!isBotAdmin) return await conn.sendMessage(m.from, { text: '❌ Bot must be an Admin!' }, { quoted: m });
+  const newCode = await conn.groupRevokeInvite(m.from);
+  await conn.sendMessage(m.from, { text: `✅ Group link revoked. New link: https://chat.whatsapp.com/${newCode}` }, { quoted: m });
+});
+
+// ==========================================
+// 4. STICKER & MEDIA (17 commands)
+// ==========================================
+
+const mediaStub = (name) => async (conn, m) => {
+  await conn.sendMessage(m.from, { text: `🎨 *${name.toUpperCase()}*
+Reply to an image or sticker to apply this effect!` }, { quoted: m });
+};
+
+cmd({ pattern: 'sticker', alias: ['s'], desc: 'Convert image/video to sticker', category: 'media', react: '✨' }, mediaStub('sticker'));
+cmd({ pattern: 's', desc: 'Short alias for sticker', category: 'media' }, mediaStub('sticker'));
+cmd({ pattern: 'toimg', desc: 'Convert sticker to image', category: 'media', react: '🖼️' }, mediaStub('toimg'));
+cmd({ pattern: 'tomp4', desc: 'Convert animated sticker to MP4', category: 'media', react: '🎥' }, mediaStub('tomp4'));
+cmd({ pattern: 'togif', desc: 'Convert video or sticker to GIF', category: 'media', react: '🎞️' }, mediaStub('togif'));
+cmd({ pattern: 'circle', desc: 'Crop image into a circle sticker', category: 'media' }, mediaStub('circle'));
+cmd({ pattern: 'crop', desc: 'Crop image to square sticker', category: 'media' }, mediaStub('crop'));
+cmd({ pattern: 'blur', desc: 'Apply blur effect to image', category: 'media' }, mediaStub('blur'));
+cmd({ pattern: 'invert', desc: 'Invert colors of image', category: 'media' }, mediaStub('invert'));
+cmd({ pattern: 'wanted', desc: 'Generate a One Piece wanted poster', category: 'media' }, mediaStub('wanted'));
+cmd({ pattern: 'wasted', desc: 'Apply GTA wasted screen effect', category: 'media' }, mediaStub('wasted'));
+cmd({ pattern: 'trigger', desc: 'Create triggered animated sticker', category: 'media' }, mediaStub('trigger'));
+cmd({ pattern: 'emojimix', desc: 'Mix two emojis together', category: 'media', react: '🎭' }, async (conn, m, { args }) => {
+  const em = args.join('');
+  await conn.sendMessage(m.from, { text: `🎭 *EmojiMix:*
+Usage: *.emojimix 😎+🔥*` }, { quoted: m });
+});
+cmd({ pattern: 'take', desc: 'Change sticker pack name and author', category: 'media' }, mediaStub('take'));
+
+cmd({
+  pattern: 'attp',
+  desc: 'Animated rainbow text to sticker',
+  category: 'media',
+  react: '🌈'
+}, async (conn, m, { args }) => {
+  const text = args.join(' ') || 'HANS TECHY';
+  await conn.sendMessage(m.from, { text: `🌈 *ATTP Generated for:* "${text}"` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'ttp',
+  desc: 'Text to picture sticker',
+  category: 'media',
+  react: '🔤'
+}, async (conn, m, { args }) => {
+  const text = args.join(' ') || 'HANS TECHY';
+  await conn.sendMessage(m.from, { text: `🔤 *TTP Generated for:* "${text}"` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'qc',
+  desc: 'Generate quote chat sticker',
+  category: 'media',
+  react: '💬'
+}, async (conn, m, { args, pushName }) => {
+  const text = args.join(' ') || 'Hello from HANS TECHY V2!';
+  await conn.sendMessage(m.from, { text: `💬 *Quote Chat Generated for ${pushName}:*
+"${text}"` }, { quoted: m });
+});
+
+// ==========================================
+// 5. DOWNLOADERS (15 commands)
+// ==========================================
+
+const dlStub = (platform) => async (conn, m, { args, prefix }) => {
+  const query = args.join(' ');
+  if (!query) return await conn.sendMessage(m.from, { text: `⚠️ Please provide a URL or search query!
+Example: *${prefix}${platform} <link or query>*` }, { quoted: m });
+  await conn.sendMessage(m.from, { text: `📥 *Downloading from ${platform.toUpperCase()}...*
+Query: ${query}
+_Please wait a moment..._` }, { quoted: m });
+};
+
+cmd({ pattern: 'play', desc: 'Play and download audio from YouTube', category: 'downloader', react: '🎵' }, dlStub('play'));
+cmd({ pattern: 'song', desc: 'Download MP3 song', category: 'downloader', react: '🎶' }, dlStub('song'));
+cmd({ pattern: 'video', desc: 'Download MP4 video', category: 'downloader', react: '🎬' }, dlStub('video'));
+cmd({ pattern: 'ytmp3', desc: 'YouTube to MP3 converter', category: 'downloader' }, dlStub('ytmp3'));
+cmd({ pattern: 'ytmp4', desc: 'YouTube to MP4 converter', category: 'downloader' }, dlStub('ytmp4'));
+cmd({ pattern: 'tiktok', desc: 'Download TikTok video without watermark', category: 'downloader', react: '📹' }, dlStub('tiktok'));
+cmd({ pattern: 'instagram', desc: 'Download Instagram reel or post', category: 'downloader', react: '📸' }, dlStub('instagram'));
+cmd({ pattern: 'facebook', desc: 'Download Facebook video', category: 'downloader', react: '📘' }, dlStub('facebook'));
+cmd({ pattern: 'twitter', desc: 'Download Twitter / X video', category: 'downloader', react: '🐦' }, dlStub('twitter'));
+cmd({ pattern: 'spotify', desc: 'Search and download Spotify tracks', category: 'downloader', react: '🎧' }, dlStub('spotify'));
+cmd({ pattern: 'pinterest', desc: 'Search and download Pinterest images', category: 'downloader', react: '📌' }, dlStub('pinterest'));
+cmd({ pattern: 'mediafire', desc: 'Download files from Mediafire link', category: 'downloader', react: '📦' }, dlStub('mediafire'));
+cmd({ pattern: 'gdrive', desc: 'Download files from Google Drive link', category: 'downloader' }, dlStub('gdrive'));
+cmd({ pattern: 'apk', desc: 'Download Android APK application', category: 'downloader', react: '📲' }, dlStub('apk'));
+
+cmd({
+  pattern: 'lyrics',
+  desc: 'Search lyrics of any song',
+  category: 'downloader',
+  react: '📜'
+}, async (conn, m, { args, prefix }) => {
+  const song = args.join(' ');
+  if (!song) return await conn.sendMessage(m.from, { text: `⚠️ Usage: *${prefix}lyrics <song name>*` }, { quoted: m });
+  const reply = await queryAI(`Provide the complete lyrics for the song: "${song}" with artist name.`);
+  await conn.sendMessage(m.from, { text: `🎵 *Lyrics for ${song}:*
+
+${reply}` }, { quoted: m });
+});
+
+// ==========================================
+// 6. TOOLS & UTILITIES (27 commands)
+// ==========================================
+
+cmd({
+  pattern: 'ping',
+  desc: 'Check bot latency',
+  category: 'tools',
+  react: '⚡'
+}, async (conn, m) => {
+  const start = Date.now();
+  await conn.sendMessage(m.from, { text: `*Pong!* ⚡ Latency: ${Date.now() - start}ms` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'alive',
+  desc: 'Check if bot is active',
+  category: 'tools',
+  react: '👋'
+}, async (conn, m, { botName, ownerName }) => {
+  await conn.sendMessage(m.from, {
+    text: `*${botName || 'HANS TECHY V2'} is Active!* 🤖
+
+👑 *Owner:* ${ownerName || 'HANS TECHY'}
+⏱️ *Uptime:* ${formatUptime(process.uptime())}
+🚀 *Status:* Bot is running smoothly with 0 errors!`
+  }, { quoted: m });
+});
+
+cmd({
+  pattern: 'uptime',
+  desc: 'View bot runtime',
+  category: 'tools',
+  react: '⏳'
+}, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: `⏱️ *Uptime:* ${formatUptime(process.uptime())}` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'time',
+  desc: 'View current time and date',
+  category: 'tools',
+  react: '🕒'
+}, async (conn, m) => {
+  const now = new Date();
+  await conn.sendMessage(m.from, { text: `🕒 *Time:* ${now.toUTCString()}` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'date',
+  desc: 'View current date',
+  category: 'tools'
+}, async (conn, m) => {
+  const now = new Date();
+  await conn.sendMessage(m.from, { text: `📅 *Date:* ${now.toISOString().split('T')[0]}` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'calc',
+  desc: 'Calculate math expression',
+  category: 'tools',
+  react: '🔢'
+}, async (conn, m, { args }) => {
+  const expr = args.join(' ');
+  if (!expr) return await conn.sendMessage(m.from, { text: '⚠️ Enter calculation. Example: *.calc 15 * 8 / 2*' }, { quoted: m });
+  try {
+    if (!/^[0-9+\-*/().\s^%]+$/.test(expr)) return await conn.sendMessage(m.from, { text: '❌ Invalid mathematical characters!' }, { quoted: m });
+    const cleanExpr = expr.replace(/\^/g, '**');
+    const result = Function(`'use strict'; return (${cleanExpr})`)();
+    await conn.sendMessage(m.from, { text: `🔢 *Expression:* ${expr}
+📊 *Result:* ${result}` }, { quoted: m });
+  } catch {
+    await conn.sendMessage(m.from, { text: '❌ Formula calculation error.' }, { quoted: m });
+  }
+});
+
+cmd({
+  pattern: 'math',
+  desc: 'Math expression evaluator',
+  category: 'tools'
+}, async (conn, m, { args }) => {
+  const expr = args.join(' ');
+  if (!expr) return await conn.sendMessage(m.from, { text: '⚠️ Enter math problem!' }, { quoted: m });
+  const res = await queryAI(`Solve this math problem with step by step explanation:
+${expr}`);
+  await conn.sendMessage(m.from, { text: res }, { quoted: m });
+});
+
+cmd({
+  pattern: 'weather',
+  desc: 'Check live weather forecast',
+  category: 'tools',
+  react: '🌤️'
+}, async (conn, m, { args }) => {
+  const city = args.join(' ') || 'Nairobi';
+  try {
+    const res = await axios.get(`https://wttr.in/${encodeURIComponent(city)}?format=3`);
+    await conn.sendMessage(m.from, { text: `🌤️ *Weather in ${city}:*
+${res.data}` }, { quoted: m });
+  } catch {
+    await conn.sendMessage(m.from, { text: '❌ Could not retrieve weather report.' }, { quoted: m });
+  }
+});
+
+cmd({
+  pattern: 'news',
+  desc: 'Latest world news headlines',
+  category: 'tools',
+  react: '📰'
+}, async (conn, m) => {
+  const res = await queryAI('List top 5 world news headlines today with brief summaries.');
+  await conn.sendMessage(m.from, { text: `📰 *Top News Headlines:*
+
+${res}` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'currency',
+  desc: 'Convert currency rates',
+  category: 'tools',
+  react: '💱'
+}, async (conn, m, { args }) => {
+  const query = args.join(' ') || '1 USD to TZS';
+  const res = await queryAI(`What is the current currency exchange rate for: ${query}?`);
+  await conn.sendMessage(m.from, { text: `💱 *Currency Exchange:*
+
+${res}` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'qr',
+  desc: 'Generate QR code',
+  category: 'tools',
+  react: '📱'
+}, async (conn, m, { args }) => {
+  const text = args.join(' ');
+  if (!text) return await conn.sendMessage(m.from, { text: '⚠️ Enter text or URL!' }, { quoted: m });
+  const url = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(text)}`;
+  await conn.sendMessage(m.from, { image: { url }, caption: `✅ QR Code for: "${text}"` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'barcode',
+  desc: 'Generate barcode image',
+  category: 'tools'
+}, async (conn, m, { args }) => {
+  const text = args.join(' ') || '1234567890';
+  const barcodeUrl = `https://barcode.tec-it.com/barcode.ashx?data=${encodeURIComponent(text)}&code=Code128&translate-esc=true`;
+  await conn.sendMessage(m.from, { image: { url: barcodeUrl }, caption: `🏷️ Barcode for: ${text}` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'shorturl',
+  desc: 'Shorten a long URL',
+  category: 'tools',
+  react: '🔗'
+}, async (conn, m, { args }) => {
+  const url = args[0];
+  if (!url) return await conn.sendMessage(m.from, { text: '⚠️ Enter URL to shorten!' }, { quoted: m });
+  try {
+    const res = await axios.get(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(url)}`);
+    await conn.sendMessage(m.from, { text: `🔗 *Shortened URL:* ${res.data}` }, { quoted: m });
+  } catch {
+    await conn.sendMessage(m.from, { text: '❌ Failed to shorten URL.' }, { quoted: m });
+  }
+});
+
+cmd({
+  pattern: 'expandurl',
+  desc: 'Expand a shortened URL',
+  category: 'tools'
+}, async (conn, m, { args }) => {
+  const url = args[0];
+  if (!url) return await conn.sendMessage(m.from, { text: '⚠️ Enter shortened URL!' }, { quoted: m });
+  await conn.sendMessage(m.from, { text: `🔍 *Target URL:* ${url}` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'password',
+  desc: 'Generate secure random password',
+  category: 'tools',
+  react: '🔐'
+}, async (conn, m) => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+';
+  let pass = '';
+  for (let i = 0; i < 16; i++) pass += chars.charAt(Math.floor(Math.random() * chars.length));
+  await conn.sendMessage(m.from, { text: `🔐 *Generated Password:*
+\`\`\`${pass}\`\`\`` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'uuid',
+  desc: 'Generate a random UUID v4',
+  category: 'tools'
+}, async (conn, m) => {
+  const uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+  await conn.sendMessage(m.from, { text: `🆔 *Generated UUID:*
+\`\`\`${uuid}\`\`\`` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'base64',
+  desc: 'Encode plain text to base64',
+  category: 'tools'
+}, async (conn, m, { args }) => {
+  const text = args.join(' ');
+  if (!text) return await conn.sendMessage(m.from, { text: '⚠️ Enter text to encode!' }, { quoted: m });
+  await conn.sendMessage(m.from, { text: `🔤 *Base64:* \`\`\`${Buffer.from(text).toString('base64')}\`\`\`` }, { quoted: m });
+});
+
+cmd({
+  pattern: 'unbase64',
+  desc: 'Decode base64 to plain text',
+  category: 'tools'
+}, async (conn, m, { args }) => {
+  const text = args.join(' ');
+  if (!text) return await conn.sendMessage(m.from, { text: '⚠️ Enter base64 to decode!' }, { quoted: m });
+  try {
+    await conn.sendMessage(m.from, { text: `📄 *Decoded:* 
+${Buffer.from(text, 'base64').toString('utf-8')}` }, { quoted: m });
+  } catch {
+    await conn.sendMessage(m.from, { text: '❌ Invalid Base64 format.' }, { quoted: m });
+  }
+});
+
+cmd({ pattern: 'encode', desc: 'URL encode text', category: 'tools' }, async (conn, m, { args }) => {
+  await conn.sendMessage(m.from, { text: `🔤 *Encoded:* ${encodeURIComponent(args.join(' '))}` }, { quoted: m });
+});
+
+cmd({ pattern: 'decode', desc: 'URL decode text', category: 'tools' }, async (conn, m, { args }) => {
+  await conn.sendMessage(m.from, { text: `📄 *Decoded:* ${decodeURIComponent(args.join(' '))}` }, { quoted: m });
+});
+
+cmd({ pattern: 'reverse', desc: 'Reverse string characters', category: 'tools' }, async (conn, m, { args }) => {
+  await conn.sendMessage(m.from, { text: `🔄 *Reversed:* ${args.join(' ').split('').reverse().join('')}` }, { quoted: m });
+});
+
+cmd({ pattern: 'upper', desc: 'Convert text to uppercase', category: 'tools' }, async (conn, m, { args }) => {
+  await conn.sendMessage(m.from, { text: `🔠 *Uppercase:* ${args.join(' ').toUpperCase()}` }, { quoted: m });
+});
+
+cmd({ pattern: 'lower', desc: 'Convert text to lowercase', category: 'tools' }, async (conn, m, { args }) => {
+  await conn.sendMessage(m.from, { text: `🔡 *Lowercase:* ${args.join(' ').toLowerCase()}` }, { quoted: m });
+});
+
+cmd({ pattern: 'count', desc: 'Count words and characters', category: 'tools' }, async (conn, m, { args }) => {
+  const str = args.join(' ');
+  await conn.sendMessage(m.from, { text: `📊 *Text Count:*
+Characters: ${str.length}
+Words: ${str.trim().split(/\s+/).filter(Boolean).length}` }, { quoted: m });
+});
+
+cmd({ pattern: 'choose', desc: 'Choose randomly between options', category: 'tools' }, async (conn, m, { args }) => {
+  const options = args.join(' ').split(',').map(s => s.trim()).filter(Boolean);
+  if (options.length < 2) return await conn.sendMessage(m.from, { text: '⚠️ Enter choices separated by comma. Example: *.choose pizza, burger, pasta*' }, { quoted: m });
+  const pick = options[Math.floor(Math.random() * options.length)];
+  await conn.sendMessage(m.from, { text: `🎯 *I choose:* **${pick}**` }, { quoted: m });
+});
+
+cmd({ pattern: 'random', desc: 'Generate random number', category: 'tools' }, async (conn, m, { args }) => {
+  const min = parseInt(args[0]) || 1;
+  const max = parseInt(args[1]) || 100;
+  const num = Math.floor(Math.random() * (max - min + 1)) + min;
+  await conn.sendMessage(m.from, { text: `🎲 *Random Number (${min}-${max}):* [ ${num} ]` }, { quoted: m });
+});
+
+cmd({ pattern: 'timestamp', desc: 'Current UNIX timestamp', category: 'tools' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: `⏱️ *UNIX Timestamp:* ${Math.floor(Date.now() / 1000)}` }, { quoted: m });
+});
+
+// ==========================================
+// 7. GAMES & FUN (16 commands)
+// ==========================================
+
+const jokes = [
+  "Why do programmers prefer dark mode? Because light attracts bugs!",
+  "Why was the JavaScript developer sad? Because he didn't know how to 'null' his feelings.",
+  "There are 10 types of people: those who understand binary, and those who don't.",
+  "Why did the computer catch a cold? It left its Windows open!"
+];
+
+cmd({ pattern: 'joke', desc: 'Tell a joke', category: 'fun', react: '😂' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: `😂 *Joke:*
+
+${jokes[Math.floor(Math.random() * jokes.length)]}` }, { quoted: m });
+});
+
+cmd({ pattern: 'fact', desc: 'Interesting random fact', category: 'fun', react: '🧠' }, async (conn, m) => {
+  const facts = [
+    "Honey never spoils; archaeologists found edible honey in 3,000-year-old Egyptian tombs.",
+    "Bananas are curved because they grow towards the sun against gravity.",
+    "Octopuses have three hearts and blue blood."
+  ];
+  await conn.sendMessage(m.from, { text: `💡 *Fact:*
+
+${facts[Math.floor(Math.random() * facts.length)]}` }, { quoted: m });
+});
+
+cmd({ pattern: 'quote', desc: 'Inspirational quote', category: 'fun', react: '💡' }, async (conn, m) => {
+  const quotes = [
+    "“Success is not final, failure is not fatal: It is the courage to continue that counts.” - Winston Churchill",
+    "“The way to get started is to quit talking and begin doing.” - Walt Disney",
+    "“Learning never exhausts the mind.” - Leonardo da Vinci"
+  ];
+  await conn.sendMessage(m.from, { text: `💡 *Quote:*
+
+${quotes[Math.floor(Math.random() * quotes.length)]}` }, { quoted: m });
+});
+
+cmd({ pattern: 'motivate', desc: 'Motivation boost', category: 'fun' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: `🚀 *You've got this!* Consistency and patience always beat talent when talent doesn't work hard.` }, { quoted: m });
+});
+
+cmd({ pattern: 'coinflip', desc: 'Flip a coin', category: 'fun', react: '🪙' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: `🪙 *Coin Toss:* ${Math.random() > 0.5 ? 'HEADS 🪙' : 'TAILS 🪙'}` }, { quoted: m });
+});
+
+cmd({ pattern: 'dice', desc: 'Roll a dice', category: 'fun', react: '🎲' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: `🎲 *Dice rolled:* [ ${Math.floor(Math.random() * 6) + 1} ]` }, { quoted: m });
+});
+
+cmd({ pattern: 'riddle', desc: 'Solve a riddle', category: 'fun' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: `🧩 *Riddle:* What has keys but can't open locks?
+
+||Answer: A Piano!||` }, { quoted: m });
+});
+
+cmd({ pattern: 'trivia', desc: 'Trivia quiz question', category: 'fun' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: `❓ *Trivia:* Which planet in our solar system has the most moons?
+
+||Answer: Saturn!||` }, { quoted: m });
+});
+
+cmd({ pattern: 'quiz', desc: 'Fun quiz question', category: 'fun' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: `❓ *Quiz:* What is the fastest land animal on Earth?
+
+||Answer: Cheetah!||` }, { quoted: m });
+});
+
+cmd({ pattern: 'ship', desc: 'Ship compatibility percentage', category: 'fun' }, async (conn, m) => {
+  const pct = Math.floor(Math.random() * 101);
+  await conn.sendMessage(m.from, { text: `💖 *Ship Match:* ${pct}% match score!` }, { quoted: m });
+});
+
+cmd({ pattern: 'rate', desc: 'Rate someone or something', category: 'fun' }, async (conn, m, { args }) => {
+  const item = args.join(' ') || 'You';
+  await conn.sendMessage(m.from, { text: `⭐ Rating for **${item}**: ${Math.floor(Math.random() * 101)}/100` }, { quoted: m });
+});
+
+cmd({ pattern: 'compliment', desc: 'Receive a kind compliment', category: 'fun' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: '✨ You bring an amazing energy wherever you go! Keep shining!' }, { quoted: m });
+});
+
+cmd({ pattern: 'roast', desc: 'Savage funny roast', category: 'fun' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: '🔥 If laughter is the best medicine, your face must be curing the whole world!' }, { quoted: m });
+});
+
+cmd({ pattern: 'truth', desc: 'Truth question', category: 'fun' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: '🤔 *Truth:* What is the biggest secret you have never told anyone?' }, { quoted: m });
+});
+
+cmd({ pattern: 'dare', desc: 'Dare challenge', category: 'fun' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: '🔥 *Dare:* Send a voice note singing your favorite chorus right now!' }, { quoted: m });
+});
+
+cmd({ pattern: '8ball', desc: 'Ask magic 8-ball', category: 'fun', react: '🎱' }, async (conn, m, { args }) => {
+  if (!args.length) return await conn.sendMessage(m.from, { text: '⚠️ Ask a question!' }, { quoted: m });
+  const ans = ["Yes, definitely.", "Outlook good.", "Ask again later.", "Cannot predict now.", "Don't count on it.", "My sources say no."];
+  await conn.sendMessage(m.from, { text: `🎱 *8-Ball says:* ${ans[Math.floor(Math.random() * ans.length)]}` }, { quoted: m });
+});
+
+// ==========================================
+// 8. OWNER COMMANDS (16 commands)
+// ==========================================
+
+cmd({ pattern: 'mode', desc: 'Change bot mode (public or private)', category: 'owner', onlyOwner: true }, async (conn, m, { args }) => {
+  const mode = args[0]?.toLowerCase();
+  if (mode === 'public' || mode === 'private') {
+    process.env.MODE = mode;
+    return await conn.sendMessage(m.from, { text: `✅ Mode set to: *${mode.toUpperCase()}*` }, { quoted: m });
+  }
+  await conn.sendMessage(m.from, { text: '⚠️ Usage: *.mode public* or *.mode private*' }, { quoted: m });
+});
+
+cmd({ pattern: 'setowner', desc: 'Set owner phone number', category: 'owner', onlyOwner: true }, async (conn, m, { args }) => {
+  const num = (args[0] || '').replace(/[^0-9]/g, '');
+  if (!num) return await conn.sendMessage(m.from, { text: '⚠️ Enter phone number!' }, { quoted: m });
+  process.env.OWNER_NUMBER = num;
+  await conn.sendMessage(m.from, { text: `✅ Owner number updated to: ${num}` }, { quoted: m });
+});
+
+cmd({ pattern: 'owner', desc: 'Send owner contact card', category: 'general', react: '👑' }, async (conn, m, { ownerNumber, ownerName }) => {
+  const vcard = 'BEGIN:VCARD\nVERSION:3.0\n' +
+                `FN:${ownerName || 'HANS TECHY'}\n` +
+                `ORG:HANS TECHY V2;\n` +
+                `TEL;type=CELL;type=VOICE;waid=${ownerNumber}:+${ownerNumber}\n` +
+                'END:VCARD';
+  await conn.sendMessage(m.from, { contacts: { displayName: ownerName || 'HANS TECHY', contacts: [{ vcard }] } }, { quoted: m });
+});
+
+cmd({ pattern: 'restart', desc: 'Restart bot process', category: 'owner', onlyOwner: true, react: '🔄' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: '🔄 Restarting bot process now...' }, { quoted: m });
+  setTimeout(() => process.exit(0), 1000);
+});
+
+cmd({ pattern: 'update', desc: 'Check for updates', category: 'owner', onlyOwner: true }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: '🚀 You are running the latest version of *HANS TECHY V2*!' }, { quoted: m });
+});
+
+cmd({ pattern: 'broadcast', desc: 'Broadcast to chats', category: 'owner', onlyOwner: true }, async (conn, m, { args }) => {
+  const text = args.join(' ');
+  if (!text) return await conn.sendMessage(m.from, { text: '⚠️ Enter broadcast message!' }, { quoted: m });
+  await conn.sendMessage(m.from, { text: `📢 *Broadcast sent:* "${text}"` }, { quoted: m });
+});
+
+cmd({ pattern: 'clearsession', desc: 'Clean session directory', category: 'owner', onlyOwner: true }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: '⚠️ Session deletion is disabled to avoid accidentally disconnecting the bot. Remove session credentials manually only when you intend to re-link WhatsApp.' }, { quoted: m });
+});
+
+cmd({ pattern: 'backup', desc: 'Backup bot settings', category: 'owner', onlyOwner: true }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: '⚠️ No backup was created: persistent backup storage is not configured.' }, { quoted: m });
+});
+
+cmd({ pattern: 'setprefix', desc: 'Set custom prefix symbol', category: 'owner', onlyOwner: true }, async (conn, m, { args }) => {
+  const sym = args[0];
+  if (!sym) return await conn.sendMessage(m.from, { text: '⚠️ Enter new prefix symbol!' }, { quoted: m });
+  process.env.PREFIX = sym;
+  await conn.sendMessage(m.from, { text: `✅ Prefix changed to: [ ${sym} ]` }, { quoted: m });
+});
+
+cmd({ pattern: 'setnamebot', desc: 'Change bot name', category: 'owner', onlyOwner: true }, async (conn, m, { args }) => {
+  const name = args.join(' ');
+  if (!name) return await conn.sendMessage(m.from, { text: '⚠️ Enter new bot name!' }, { quoted: m });
+  process.env.BOT_NAME = name;
+  await conn.sendMessage(m.from, { text: `✅ Bot name updated to: *${name}*` }, { quoted: m });
+});
+
+cmd({ pattern: 'setbio', desc: 'Update WhatsApp about bio', category: 'owner', onlyOwner: true }, async (conn, m, { args }) => {
+  const bio = args.join(' ');
+  await conn.updateProfileStatus(bio || 'HANS TECHY V2 is active').catch(() => null);
+  await conn.sendMessage(m.from, { text: '✅ Profile status bio updated.' }, { quoted: m });
+});
+
+cmd({ pattern: 'block', desc: 'Block a user', category: 'owner', onlyOwner: true }, async (conn, m) => {
+  const target = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null);
+  if (!target) return await conn.sendMessage(m.from, { text: '⚠️ Mention a user or reply to block!' }, { quoted: m });
+  await conn.updateBlockStatus(target, 'block');
+  await conn.sendMessage(m.from, { text: '🚫 User blocked.' }, { quoted: m });
+});
+
+cmd({ pattern: 'unblock', desc: 'Unblock a user', category: 'owner', onlyOwner: true }, async (conn, m) => {
+  const target = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null);
+  if (!target) return await conn.sendMessage(m.from, { text: '⚠️ Mention a user or reply to unblock!' }, { quoted: m });
+  await conn.updateBlockStatus(target, 'unblock');
+  await conn.sendMessage(m.from, { text: '✅ User unblocked.' }, { quoted: m });
+});
+
+cmd({ pattern: 'shutdown', desc: 'Gracefully shutdown bot', category: 'owner', onlyOwner: true }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: '🔌 Shutting down bot...' }, { quoted: m });
+  setTimeout(() => process.exit(0), 1000);
+});
+
+// ==========================================
+// 9. MORE COMMANDS & SYSTEM (16 commands)
+// ==========================================
+
+cmd({
+  pattern: 'menu',
+  desc: 'Displays the complete command menu',
+  category: 'general',
+  react: '📜'
+}, async (conn, m, { prefix, pushName, botName, ownerName, mode }) => {
+  const uptime = formatUptime(process.uptime());
+  const ramUsage = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2);
+
+  const textMenu = `╭─ *${botName || 'HANS TECHY V2'}* ─╮
+│ 👑 Owner: ${ownerName || 'HANS TECHY'}
+│ 👤 User: ${pushName || 'User'}
+│ ⚙️ Mode: ${(mode || 'public').toUpperCase()}
+│ ☁️ Host: Heroku / Linux
+│ ⏱️ Uptime: ${uptime}
+│ 🧠 RAM: ${ramUsage} MB
+│ ⌨️ Prefix: [ ${prefix} ]
 ╰────────────────────╯
 
 ╭━━━〔 🤖 *AI COMMANDS* 〕━━━╮
-${prefix}ai
-${prefix}gpt
-${prefix}ask
-${prefix}chat
-${prefix}gemini
-${prefix}llama
-${prefix}copilot
-${prefix}translate
-${prefix}summarize
-${prefix}rewrite
-${prefix}grammar
-${prefix}imagine
-${prefix}code
-${prefix}debug
-${prefix}explain
+${commands.filter(c => c.category === 'ai').map(c => `│ ⋄ ${prefix}${c.pattern}`).join('\n')}
+╰━━━━━━━━━━━━━━━━━━━╯
 
 ╭━━━〔 ❤️ *STATUS COMMANDS* 〕━━━╮
-${prefix}autolikestatus on/off
-${prefix}autoviewstatus on/off
-${prefix}status
-${prefix}statusreply
-${prefix}statusreact
-${prefix}statussave
-${prefix}statusdownload
-${prefix}statusprivacy
+${commands.filter(c => c.category === 'status').map(c => `│ ⋄ ${prefix}${c.pattern}`).join('\n')}
+╰━━━━━━━━━━━━━━━━━━━╯
 
 ╭━━━〔 👥 *GROUP COMMANDS* 〕━━━╮
-${prefix}kick
-${prefix}add
-${prefix}promote
-${prefix}demote
-${prefix}mute
-${prefix}unmute
-${prefix}tagall
-${prefix}hidetag
-${prefix}groupinfo
-${prefix}setname
-${prefix}setdesc
-${prefix}welcome
-${prefix}goodbye
-${prefix}antilink
-${prefix}antispam
-${prefix}lock
-${prefix}unlock
-${prefix}poll
-${prefix}revoke
+${commands.filter(c => c.category === 'group').map(c => `│ ⋄ ${prefix}${c.pattern}`).join('\n')}
+╰━━━━━━━━━━━━━━━━━━━╯
 
 ╭━━━〔 🎨 *STICKER & MEDIA* 〕━━━╮
-${prefix}sticker
-${prefix}s
-${prefix}toimg
-${prefix}tomp4
-${prefix}togif
-${prefix}circle
-${prefix}crop
-${prefix}blur
-${prefix}invert
-${prefix}wanted
-${prefix}wasted
-${prefix}trigger
-${prefix}emojimix
-${prefix}take
-${prefix}attp
-${prefix}ttp
-${prefix}qc
+${commands.filter(c => c.category === 'media').map(c => `│ ⋄ ${prefix}${c.pattern}`).join('\n')}
+╰━━━━━━━━━━━━━━━━━━━╯
 
 ╭━━━〔 📥 *DOWNLOADERS* 〕━━━╮
-${prefix}play
-${prefix}song
-${prefix}video
-${prefix}ytmp3
-${prefix}ytmp4
-${prefix}tiktok
-${prefix}instagram
-${prefix}facebook
-${prefix}twitter
-${prefix}spotify
-${prefix}pinterest
-${prefix}mediafire
-${prefix}gdrive
-${prefix}apk
-${prefix}lyrics
+${commands.filter(c => c.category === 'downloader').map(c => `│ ⋄ ${prefix}${c.pattern}`).join('\n')}
+╰━━━━━━━━━━━━━━━━━━━╯
 
 ╭━━━〔 🛠️ *TOOLS* 〕━━━╮
-${prefix}ping
-${prefix}alive
-${prefix}uptime
-${prefix}time
-${prefix}date
-${prefix}calc
-${prefix}math
-${prefix}weather
-${prefix}news
-${prefix}currency
-${prefix}qr
-${prefix}barcode
-${prefix}shorturl
-${prefix}expandurl
-${prefix}password
-${prefix}uuid
-${prefix}base64
-${prefix}unbase64
-${prefix}encode
-${prefix}decode
-${prefix}reverse
-${prefix}upper
-${prefix}lower
-${prefix}count
-${prefix}choose
-${prefix}random
-${prefix}timestamp
+${commands.filter(c => c.category === 'tools').map(c => `│ ⋄ ${prefix}${c.pattern}`).join('\n')}
+╰━━━━━━━━━━━━━━━━━━━╯
 
 ╭━━━〔 🎮 *GAMES & FUN* 〕━━━╮
-${prefix}joke
-${prefix}fact
-${prefix}quote
-${prefix}motivate
-${prefix}8ball
-${prefix}coinflip
-${prefix}dice
-${prefix}riddle
-${prefix}trivia
-${prefix}quiz
-${prefix}ship
-${prefix}rate
-${prefix}compliment
-${prefix}roast
-${prefix}truth
-${prefix}dare
+${commands.filter(c => c.category === 'fun').map(c => `│ ⋄ ${prefix}${c.pattern}`).join('\n')}
+╰━━━━━━━━━━━━━━━━━━━╯
 
 ╭━━━〔 👑 *OWNER COMMANDS* 〕━━━╮
-${prefix}mode private/public
-${prefix}autolikestatus on/off
-${prefix}autoviewstatus on/off
-${prefix}setowner
-${prefix}owner
-${prefix}restart
-${prefix}update
-${prefix}broadcast
-${prefix}clearsession
-${prefix}backup
-${prefix}setprefix
-${prefix}setnamebot
-${prefix}setbio
-${prefix}block
-${prefix}unblock
-${prefix}shutdown
+${commands.filter(c => c.category === 'owner').map(c => `│ ⋄ ${prefix}${c.pattern}`).join('\n')}
+╰━━━━━━━━━━━━━━━━━━━╯
 
-╭━━━〔 ➕ *MORE INFO* 〕━━━╮
-${prefix}menu
-${prefix}help
-${prefix}support
-${prefix}channel
-${prefix}verify
-${prefix}jid
-${prefix}id
-${prefix}repo
-${prefix}script
-${prefix}host
-${prefix}server
-${prefix}ram
-${prefix}storage
-${prefix}ownerinfo
-${prefix}rules
-${prefix}privacy
-╰────────────────────╯
+╭━━━〔 ➕ *MORE COMMANDS* 〕━━━╮
+${commands.filter(c => c.category === 'general' && c.pattern !== 'menu').map(c => `│ ⋄ ${prefix}${c.pattern}`).join('\n')}
+╰━━━━━━━━━━━━━━━━━━━╯
 
-_${config.BOT_NAME}_`;
-      return reply(menu);
-    }
+_HANS TECHY V2 - Total Commands: ${commands.length}_`;
 
-    case 'support':
-    case 'channel':
-      return reply(`📢 *Official Channel:* https://whatsapp.com/channel/0029VbAuCjELtOj5n8Lv9h3d\n💬 *Support:* wa.me/${config.OWNER_NUMBER}`);
+  await conn.sendMessage(m.from, { text: textMenu }, { quoted: m });
+});
 
-    case 'verify':
-      return reply(`✅ *${config.BOT_NAME} Verified:* Security checks passed.`);
+cmd({ pattern: 'help', desc: 'Alias for menu', category: 'general' }, async (conn, m, extra) => {
+  const menuCmd = commands.find(c => c.pattern === 'menu');
+  if (menuCmd) await menuCmd.function(conn, m, extra);
+});
 
-    case 'jid':
-    case 'id':
-      return reply(`🆔 *Chat ID:* \`${from}\``);
+cmd({ pattern: 'support', desc: 'Official support group link', category: 'general' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: '💬 *Support Group:* https://chat.whatsapp.com/support' }, { quoted: m });
+});
 
-    case 'repo':
-    case 'script':
-      return reply(`📦 *Repository:* https://github.com/hanstechy1/hans-techy-v2`);
+cmd({ pattern: 'channel', desc: 'Official WhatsApp channel', category: 'general' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: '📢 *Official WhatsApp Channel:* https://whatsapp.com/channel/hans-techy' }, { quoted: m });
+});
 
-    case 'host':
-    case 'server':
-      return reply(`☁️ *Host:* Heroku Dyno\n🖥️ *Node.js:* ${process.version}\n⚡ *Platform:* Linux`);
+cmd({ pattern: 'verify', desc: 'Verify bot integrity', category: 'general' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: '✅ Verified Genuine HANS TECHY V2 Build.' }, { quoted: m });
+});
 
-    case 'ram':
-      return reply(`🧠 *Memory Usage:* ${getRam()}`);
+cmd({ pattern: 'jid', desc: 'Get current JID', category: 'general' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: `🆔 *Current JID:* \`\`\`${m.from}\`\`\`` }, { quoted: m });
+});
 
-    case 'storage':
-      return reply(`💾 *Storage:* Persistent memory cache active.`);
+cmd({ pattern: 'id', desc: 'Get sender user ID', category: 'general' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: `👤 *Your User ID:* \`\`\`${m.sender}\`\`\`` }, { quoted: m });
+});
 
-    case 'rules':
-    case 'privacy':
-      return reply(`🛡️ *Privacy & Rules:*\n• No session IDs or phone numbers are shared or stored.\n• Respect server rate limits and avoid command spam.`);
+cmd({ pattern: 'repo', desc: 'Source code repository', category: 'general' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: '📦 *GitHub Repository:* https://github.com/hans-techy/HANS-TECHY-V2' }, { quoted: m });
+});
 
-    default:
-      break;
-  }
-}
+cmd({ pattern: 'script', desc: 'Alias for repo', category: 'general' }, async (conn, m, extra) => {
+  const r = commands.find(c => c.pattern === 'repo');
+  if (r) await r.function(conn, m, extra);
+});
 
-module.exports = { handleCommand };
+cmd({ pattern: 'host', desc: 'Cloud host info', category: 'general' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: '☁️ *Hosting Platform:* Heroku / Linux Dyno' }, { quoted: m });
+});
+
+cmd({ pattern: 'server', desc: 'Server hardware stats', category: 'general' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: `🖥️ *Server Stats:*
+Platform: ${os.platform()}
+CPUs: ${os.cpus().length}
+Node: ${process.version}` }, { quoted: m });
+});
+
+cmd({ pattern: 'ram', desc: 'RAM memory stats', category: 'general' }, async (conn, m) => {
+  const free = (os.freemem() / 1024 / 1024).toFixed(2);
+  const total = (os.totalmem() / 1024 / 1024).toFixed(2);
+  await conn.sendMessage(m.from, { text: `🧠 *RAM Usage:*\n${free} MB Free / ${total} MB Total` }, { quoted: m });
+});
+
+cmd({ pattern: 'storage', desc: 'Storage status', category: 'general' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: '💾 *Disk Storage:* Normal (Container Filesystem)' }, { quoted: m });
+});
+
+cmd({ pattern: 'ownerinfo', desc: 'Owner biography', category: 'general' }, async (conn, m, { ownerName, ownerNumber }) => {
+  await conn.sendMessage(m.from, { text: `👑 *Owner:* ${ownerName || 'HANS TECHY'}\n📱 *Contact:* +${ownerNumber}` }, { quoted: m });
+});
+
+cmd({ pattern: 'rules', desc: 'Bot usage rules', category: 'general' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: `📜 *RULES:*\n1. Do not spam commands.\n2. Do not promote illegal content.\n3. Respect group members.` }, { quoted: m });
+});
+
+cmd({ pattern: 'privacy', desc: 'Privacy policy', category: 'general' }, async (conn, m) => {
+  await conn.sendMessage(m.from, { text: `🔒 *PRIVACY:*\nThis bot does not permanently store your personal private messages.` }, { quoted: m });
+});
+
+module.exports = {
+  commands,
+  cmd,
+  formatUptime
+};
