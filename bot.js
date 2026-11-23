@@ -8,22 +8,42 @@ const {
 } = require('@whiskeysockets/baileys');
 const fs = require('fs-extra');
 const pino = require('pino');
+const NodeCache = require('node-cache');
+const express = require('express');
 const config = require('./config');
 const { handleCommand } = require('./command');
 
-// Kumbukumbu ya kuzuia "Waiting for this message"
+// 1. Cache maalum za kuzuia "Waiting for this message"
+const msgRetryCounterCache = new NodeCache({ stdTTL: 300, useClones: false });
+const groupCache = new NodeCache({ stdTTL: 300, useClones: false });
 const messageStore = new Map();
-const msgRetryCounterCache = new Map();
-const groupCache = new Map();
+
+// Helper ya kuhifadhi ujumbe kwenye messageStore
+function saveMessageToStore(m) {
+  if (m?.key?.id && m?.message) {
+    messageStore.set(m.key.id, m.message);
+    if (messageStore.size > 5000) {
+      const firstKey = messageStore.keys().next().value;
+      messageStore.delete(firstKey);
+    }
+  }
+}
 
 let botStatus = {
   connected: false,
   user: null
 };
 
+// 2. Auth salama: Hatuandiki upya creds.json kama tayari zipo
 async function setupAuth() {
   const dir = './session';
   await fs.ensureDir(dir);
+  
+  // Kama faili lipo tayari, usilibadilishe ili usipoteze Signal keys zilizosasishwa
+  if (await fs.pathExists(`${dir}/creds.json`)) {
+    return true;
+  }
+
   const rawSession = (config.SESSION_ID || '').trim();
   if (!rawSession) return false;
 
@@ -55,14 +75,25 @@ async function startBot() {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, logger)
     },
-    browser: Browsers.ubuntu('Chrome'),
+    browser: Browsers.macOS('Chrome'),
     syncFullHistory: false,
-    markOnlineOnConnect: true,
+    markOnlineOnConnect: false,
     generateHighQualityLinkPreview: false,
-    cachedGroupMetadata: async (jid) => groupCache.get(jid),
-    
-    // Hizi mbili zinajibu ombi la decryption mara moja
     msgRetryCounterCache,
+
+    // Inatafuta taarifa za Group mara moja ili kuzuia kukwama kwa meseji za group
+    cachedGroupMetadata: async (jid) => {
+      let data = groupCache.get(jid);
+      if (!data) {
+        try {
+          data = await sock.groupMetadata(jid);
+          groupCache.set(jid, data);
+        } catch {}
+      }
+      return data;
+    },
+
+    // Inarudisha ujumbe uliopita wakati simu ya mpokeaji inapotuma ombi la retry
     getMessage: async (key) => {
       if (messageStore.has(key.id)) {
         return messageStore.get(key.id);
@@ -71,7 +102,32 @@ async function startBot() {
     }
   });
 
+  // Kunasa ujumbe wote unaotumwa na bot (hata kutoka command.js) ili kuhakikisha unahifadhiwa kwa ajili ya retry
+  const rawSendMessage = sock.sendMessage.bind(sock);
+  sock.sendMessage = async (...args) => {
+    const sent = await rawSendMessage(...args);
+    saveMessageToStore(sent);
+    return sent;
+  };
+
   sock.ev.on('creds.update', saveCreds);
+
+  // Kujaza groupCache kiotomatiki wanachama wakibadilika au kundi likisasishwa
+  sock.ev.on('groups.update', async (updates) => {
+    for (const update of updates) {
+      try {
+        const data = await sock.groupMetadata(update.id);
+        groupCache.set(update.id, data);
+      } catch {}
+    }
+  });
+
+  sock.ev.on('group-participants.update', async (ev) => {
+    try {
+      const data = await sock.groupMetadata(ev.id);
+      groupCache.set(ev.id, data);
+    } catch {}
+  });
 
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect } = update;
@@ -84,7 +140,7 @@ async function startBot() {
     } else if (connection === 'open') {
       botStatus.connected = true;
       botStatus.user = sock.user?.id ? sock.user.id.split(':')[0] : 'Active';
-      console.log(`🚀 ${config.BOT_NAME} imeunganishwa kikamilifu!`);
+      console.log(`🚀 ${config.BOT_NAME || 'HANS TECHY'} imeunganishwa kikamilifu!`);
     }
   });
 
@@ -93,37 +149,17 @@ async function startBot() {
     const msg = messages[0];
     if (!msg?.message) return;
 
-    // Hifadhi ujumbe unaoingia kwenye cache
-    if (msg.key?.id) {
-      messageStore.set(msg.key.id, msg.message);
-      if (messageStore.size > 2000) {
-        const firstKey = messageStore.keys().next().value;
-        messageStore.delete(firstKey);
-      }
-    }
+    // Hifadhi ujumbe unaoingia kwenye cache mara moja
+    saveMessageToStore(msg);
 
     const from = msg.key.remoteJid;
 
-    // Function ya kutuma ujumbe inayotatua "Waiting for this message" kwa kila mtu
+    // Function ya kutuma ujumbe
     const reply = async (txt) => {
       try {
-        // 1. Simu inajiandaa na kuweka session tayari (Typing effect)
         await sock.sendPresenceUpdate('composing', from).catch(() => {});
-        await new Promise((res) => setTimeout(res, 400)); // Sekunde 0.4 kamilisha handshake
-
-        // 2. Kutuma ujumbe ukiwa quoted na ujumbe wa mtumaji
+        await new Promise((res) => setTimeout(res, 300));
         const sent = await sock.sendMessage(from, { text: txt }, { quoted: msg });
-
-        // 3. Hifadhi ujumbe uliotumwa ili simu ikituma retry iuone mara moja
-        if (sent?.key?.id && sent?.message) {
-          messageStore.set(sent.key.id, sent.message);
-          if (messageStore.size > 2000) {
-            const firstKey = messageStore.keys().next().value;
-            messageStore.delete(firstKey);
-          }
-        }
-        
-        // Zima typing
         await sock.sendPresenceUpdate('paused', from).catch(() => {});
         return sent;
       } catch (err) {
@@ -135,5 +171,21 @@ async function startBot() {
     await handleCommand(sock, msg, reply, { messageStore, groupCache });
   });
 }
+
+// 3. Web server ndogo ya kuzuia Heroku Crash (H10)
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', (req, res) => {
+  res.json({
+    status: botStatus.connected ? 'online' : 'connecting',
+    bot: config.BOT_NAME || 'HANS TECHY V2',
+    user: botStatus.user
+  });
+});
+app.listen(PORT, () => {
+  console.log(`Web server inasikiliza port: ${PORT}`);
+});
+
+startBot();
 
 module.exports = { startBot, botStatus };
