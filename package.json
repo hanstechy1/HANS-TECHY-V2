@@ -1,17 +1,15 @@
 {
   "name": "hans-techy-v2",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "WhatsApp Multi-Device Bot created by HANS TECHY",
   "main": "index.js",
+  "engines": { "node": ">=20" },
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "check": "node --check index.js && node --check bot.js && node --check command.js && node --check config.js",
+    "test": "npm run check"
   },
-  "keywords": [
-    "whatsapp-bot",
-    "baileys",
-    "hans-techy",
-    "multi-device"
-  ],
+  "keywords": ["whatsapp-bot", "baileys", "hans-techy", "multi-device"],
   "author": "HANS TECHY",
   "license": "ISC",
   "dependencies": {

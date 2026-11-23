@@ -1,9 +1,9 @@
 /**
- * HANS TECHY V2 - Main Entry Point (English)
- * Baileys Multi-Device WhatsApp Socket Setup & Lifecycle
+ * HANS TECHY V2 - Main Entry Point
+ * Baileys multi-device WhatsApp socket lifecycle.
  */
-
 require('dotenv').config();
+
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -18,112 +18,122 @@ const chalk = require('chalk');
 const { handleMessage } = require('./bot');
 
 const SESSION_DIR = path.join(__dirname, 'session');
+const CREDS_PATH = path.join(SESSION_DIR, 'creds.json');
+const OWNER_NUMBER = (process.env.OWNER_NUMBER || '').replace(/\D/g, '');
 
-// Ensure session directory exists
-if (!fs.existsSync(SESSION_DIR)) {
-  fs.mkdirSync(SESSION_DIR, { recursive: true });
+fs.mkdirSync(SESSION_DIR, { recursive: true, mode: 0o700 });
+
+function restoreSessionFromEnv() {
+  const sessionId = (process.env.SESSION_ID || '').trim();
+  if (!sessionId || fs.existsSync(CREDS_PATH)) return;
+
+  const separator = sessionId.indexOf('~');
+  const encoded = separator >= 0 ? sessionId.slice(separator + 1) : sessionId;
+  if (!encoded || !/^[A-Za-z0-9_+/=-]+$/.test(encoded)) {
+    throw new Error('SESSION_ID is not valid Base64 data.');
+  }
+
+  let decoded;
+  try {
+    decoded = Buffer.from(encoded, 'base64').toString('utf8');
+    const parsed = JSON.parse(decoded);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Session credentials must be a JSON object.');
+    }
+  } catch (error) {
+    throw new Error('SESSION_ID could not be decoded as valid Baileys JSON credentials: ' + error.message);
+  }
+
+  fs.writeFileSync(CREDS_PATH, decoded, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+  console.log(chalk.green('Session credentials restored from SESSION_ID.'));
 }
 
-/**
- * Decode SESSION_ID if provided in environment variables
- */
-function restoreSessionFromEnv() {
-  const sessionId = process.env.SESSION_ID;
-  const credsPath = path.join(SESSION_DIR, 'creds.json');
+let activeSocket = null;
+let starting = false;
+let reconnectTimer = null;
+let stopping = false;
 
-  if (sessionId && !fs.existsSync(credsPath)) {
-    try {
-      console.log(chalk.blue('ℹ️ Restoring session credentials from SESSION_ID...'));
-      // Remove custom prefix if present (e.g., HANS~, HANS TECHY~)
-      const cleanSession = sessionId.includes('~') ? sessionId.split('~')[1] : sessionId;
-      const decoded = Buffer.from(cleanSession, 'base64').toString('utf-8');
-      fs.writeFileSync(credsPath, decoded);
-      console.log(chalk.green('✅ Session successfully saved to session/creds.json'));
-    } catch (err) {
-      console.error(chalk.red('❌ Failed to restore SESSION_ID:'), err.message);
-    }
-  }
+function scheduleReconnect() {
+  if (stopping || reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    startBot().catch((error) => {
+      console.error(chalk.red('Reconnect failed:'), error.message);
+      scheduleReconnect();
+    });
+  }, Number(process.env.RECONNECT_DELAY_MS) || 5000);
+  reconnectTimer.unref?.();
 }
 
 async function startBot() {
-  restoreSessionFromEnv();
+  if (starting || activeSocket || stopping) return;
+  starting = true;
 
-  const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
-  const { version, isLatest } = await fetchLatestBaileysVersion().catch(() => ({
-    version: [2, 3000, 1015901307],
-    isLatest: true
-  }));
+  try {
+    restoreSessionFromEnv();
+    const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
+    const { version } = await fetchLatestBaileysVersion();
 
-  console.log(chalk.cyan(`
-╔══════════════════════════════════════╗
-║        HANS TECHY V2 BOT             ║
-║  Multi-Device WhatsApp Userbot       ║
-╚══════════════════════════════════════╝`));
-  console.log(chalk.yellow(`Using Baileys version: ${version.join('.')} (Latest: ${isLatest})`));
+    const conn = makeWASocket({
+      version,
+      logger: pino({ level: process.env.LOG_LEVEL || 'silent' }),
+      printQRInTerminal: !state.creds?.registered,
+      auth: state,
+      browser: ['HANS TECHY V2', 'Safari', '3.0'],
+      syncFullHistory: false
+    });
+    activeSocket = conn;
+    conn.ev.on('creds.update', saveCreds);
 
-  const conn = makeWASocket({
-    logger: pino({ level: 'silent' }),
-    printQRInTerminal: !process.env.SESSION_ID,
-    auth: state,
-    browser: ['HANS TECHY V2', 'Safari', '3.0'],
-    syncFullHistory: false
-  });
-
-  // Save session credentials whenever updated
-  conn.ev.on('creds.update', saveCreds);
-
-  // Monitor connection updates
-  conn.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect, qr } = update;
-
-    if (qr && !process.env.SESSION_ID) {
-      console.log(chalk.yellow('📱 Scan this QR Code with your WhatsApp:'));
-    }
-
-    if (connection === 'open') {
-      console.log(chalk.green('========================================='));
-      console.log(chalk.green('🚀 HANS TECHY V2 CONNECTED SUCCESSFULLY!'));
-      console.log(chalk.green(`🤖 Bot Name: ${process.env.BOT_NAME || 'HANS TECHY V2'}`));
-      console.log(chalk.green(`👑 Owner Number: ${process.env.OWNER_NUMBER || 'Not configured'}`));
-      console.log(chalk.green('========================================='));
-
-      // Send greeting notification to owner
-      const ownerJid = (process.env.OWNER_NUMBER || '').replace(/[^0-9]/g, '') + '@s.whatsapp.net';
-      if (ownerJid && ownerJid.length > 15) {
-        await conn.sendMessage(ownerJid, {
-          text: `*${process.env.BOT_NAME || 'HANS TECHY V2'} IS ONLINE!* 🚀\n\n` +
-                `✅ Your WhatsApp bot is now active and ready.\n` +
-                `⚙️ *Prefix:* ${process.env.PREFIX || '.'}\n` +
-                `🔒 *Mode:* ${(process.env.MODE || 'public').toUpperCase()}\n\n` +
-                `Type *${process.env.PREFIX || '.'}menu* to see all available commands!`
-        }).catch(() => null);
+    conn.ev.on('connection.update', async ({ connection, lastDisconnect }) => {
+      if (connection === 'open') {
+        console.log(chalk.green('HANS TECHY V2 connected successfully.'));
+        if (OWNER_NUMBER) {
+          await conn.sendMessage(OWNER_NUMBER + '@s.whatsapp.net', {
+            text: `*${process.env.BOT_NAME || 'HANS TECHY V2'} IS ONLINE!* 🚀\nPrefix: ${process.env.PREFIX || '.'}\nMode: ${(process.env.MODE || 'public').toUpperCase()}`
+          }).catch(() => null);
+        }
       }
-    }
 
-    if (connection === 'close') {
-      const statusCode = (lastDisconnect?.error instanceof Boom)
-        ? lastDisconnect.error.output?.statusCode
-        : null;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-
-      console.log(chalk.red(`⚠️ Connection closed (Reason: ${statusCode || 'Unknown'}).`));
-
-      if (shouldReconnect) {
-        console.log(chalk.yellow('🔄 Reconnecting in 5 seconds...'));
-        setTimeout(startBot, 5000);
-      } else {
-        console.log(chalk.red('❌ Logged out from WhatsApp. Please provide a fresh SESSION_ID or scan QR again.'));
+      if (connection === 'close') {
+        if (activeSocket === conn) activeSocket = null;
+        const statusCode = lastDisconnect?.error instanceof Boom
+          ? lastDisconnect.error.output?.statusCode
+          : lastDisconnect?.error?.output?.statusCode;
+        const loggedOut = statusCode === DisconnectReason.loggedOut;
+        console.warn(chalk.yellow('WhatsApp connection closed:'), statusCode || 'unknown');
+        if (!loggedOut) scheduleReconnect();
+        else console.error(chalk.red('WhatsApp logged out. Set a fresh SESSION_ID or relink the device.'));
       }
-    }
-  });
+    });
 
-  // Handle incoming messages
-  conn.ev.on('messages.upsert', async (upsert) => {
-    await handleMessage(conn, upsert);
-  });
+    conn.ev.on('messages.upsert', (upsert) => {
+      handleMessage(conn, upsert).catch((error) => {
+        console.error('Message handler failure:', error);
+      });
+    });
+  } finally {
+    starting = false;
+  }
 }
 
-// Start application
-startBot().catch((err) => {
-  console.error(chalk.red('Fatal initialization error:'), err);
+async function shutdown(signal) {
+  if (stopping) return;
+  stopping = true;
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  console.log(`Received ${signal}; shutting down.`);
+  try {
+    if (activeSocket?.ws?.close) activeSocket.ws.close();
+  } catch (error) {
+    console.error('Socket shutdown error:', error.message);
+  }
+  process.exit(0);
+}
+
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));
+
+startBot().catch((error) => {
+  console.error(chalk.red('Fatal initialization error:'), error);
+  scheduleReconnect();
 });

@@ -10,7 +10,7 @@ const { commands } = require('./command');
  * @param {import('@whiskeysockets/baileys').WASocket} conn Baileys socket connection
  * @param {Object} upsert Upsert event payload
  */
-async function handleMessage(conn, upsert) {
+async function handleSingleMessage(conn, upsert) {
   try {
     if (!upsert.messages || !upsert.messages[0]) return;
     const m = upsert.messages[0];
@@ -30,7 +30,7 @@ async function handleMessage(conn, upsert) {
     const prefix = process.env.PREFIX || '.';
     const botName = process.env.BOT_NAME || 'HANS TECHY V2';
     const ownerName = process.env.OWNER_NAME || 'HANS TECHY';
-    const rawOwnerNumber = (process.env.OWNER_NUMBER || '255700000000').replace(/[^0-9]/g, '');
+    const rawOwnerNumber = (process.env.OWNER_NUMBER || '').replace(/[^0-9]/g, '');
     const mode = (process.env.MODE || 'public').toLowerCase();
     const autoViewStatus = process.env.AUTO_VIEW_STATUS !== 'false';
     const autoLikeStatus = process.env.AUTO_LIKE_STATUS !== 'false';
@@ -64,7 +64,7 @@ async function handleMessage(conn, upsert) {
     const isGroup = from.endsWith('@g.us');
     const sender = isGroup ? (m.key.participant || m.participant) : from;
     const senderNumber = sender ? sender.split('@')[0].replace(/[^0-9]/g, '') : '';
-    const isOwner = senderNumber === rawOwnerNumber || m.key.fromMe;
+    const isOwner = Boolean(m.key.fromMe || (rawOwnerNumber && senderNumber === rawOwnerNumber));
     const pushName = m.pushName || 'User';
 
     // Attach sender and from directly to m for easy access
@@ -162,7 +162,7 @@ async function handleMessage(conn, upsert) {
     try {
       if (upsert.messages?.[0]?.key?.remoteJid) {
         await conn.sendMessage(upsert.messages[0].key.remoteJid, {
-          text: `❌ An error occurred while executing the command: ${err.message}`
+          text: '❌ Command failed. Please try again or contact the bot owner.'
         }, { quoted: upsert.messages[0] }).catch(() => null);
       }
     } catch {
@@ -171,4 +171,11 @@ async function handleMessage(conn, upsert) {
   }
 }
 
-module.exports = { startBot, botstatus };
+async function handleMessage(conn, upsert) {
+  // Baileys may deliver several messages in one upsert; process each independently.
+  for (const message of upsert.messages || []) {
+    await handleSingleMessage(conn, { ...upsert, messages: [message] });
+  }
+}
+
+module.exports = { handleMessage };

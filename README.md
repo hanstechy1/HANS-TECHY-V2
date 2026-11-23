@@ -47,7 +47,7 @@ Click the **Fork** button at the top right of this page to create your personal 
 <p align="left"> <a href="https://generatepaircode.lovable.app" target="_blank"> <img src="https://img.shields.io/badge/GET%20SESSION%20ID-PAIR%20CODE%20PORTAL-00FF66?style=for-the-badge&logo=whatsapp&logoColor=black" height="42" alt="Get Pair Code"/>
   </a>
 
-1. Enter your WhatsApp phone number with your country code (e.g., `255686005775`).
+1. Enter your WhatsApp phone number with your country code (e.g., `YOUR_COUNTRY_CODE_AND_NUMBER`).
 2. Click **Get Code** and copy the 8-character code shown.
 3. Open WhatsApp on your phone:
    - Go to **Linked Devices** ➡️ **Link a Device**.
@@ -62,7 +62,7 @@ Click the **Fork** button at the top right of this page to create your personal 
     <img src="https://www.herokucdn.com/deploy/button.svg" height="42" alt="Deploy to Heroku"/>
   </a>
 </p>
-Once deployment finishes, go to the **Resources** tab and ensure the `web` dyno is switched **ON**.
+Once deployment finishes, ensure the `worker` process is running. This bot does not expose an HTTP web server.
 
 ---
 
@@ -76,7 +76,7 @@ Once deployment finishes, go to the **Resources** tab and ensure the `web` dyno 
 | `BOT_NAME` | NO | `HANS TECHY V2` | Name of your bot |
 | `PREFIX` | NO | `.` | Command trigger symbol (`.`, `!`, `#`, etc.) |
 | `MODE` | NO | `public` | `public` (anyone can use) or `private` (owner only) |
-| `AUTO_READ_STATUS`| NO | `true` | Automatically view all status updates |
+| `AUTO_VIEW_STATUS`| NO | `true` | Automatically view all status updates |
 | `AUTO_LIKE_STATUS`| NO | `true` | Automatically react to status updates |
 
 ---
