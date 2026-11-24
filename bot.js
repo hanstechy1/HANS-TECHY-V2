@@ -32,21 +32,9 @@ async function handleSingleMessage(conn, upsert) {
     const ownerName = process.env.OWNER_NAME || 'HANS TECHY';
     const rawOwnerNumber = (process.env.OWNER_NUMBER || '').replace(/[^0-9]/g, '');
     const mode = (process.env.MODE || 'public').toLowerCase();
-    const autoViewStatus = process.env.AUTO_VIEW_STATUS !== 'false';
-    const autoLikeStatus = process.env.AUTO_LIKE_STATUS !== 'false';
-
-    // 1. STATUS BROADCAST HANDLER
+    // Status broadcasts are handled before normal command processing.
     if (from === 'status@broadcast') {
-      if (autoViewStatus) {
-        await conn.readMessages([m.key]).catch(() => null);
-      }
-      if (autoLikeStatus && m.key.id) {
-        const reactions = ['💚', '❤️', '🔥', '✨', '⚡', '💯', '👏', '😍'];
-        const randomEmoji = reactions[Math.floor(Math.random() * reactions.length)];
-        await conn.sendMessage(from, {
-          react: { text: randomEmoji, key: m.key }
-        }, { statusJidList: [m.key.participant] }).catch(() => null);
-      }
+      await handleStatusMessage(conn, m);
       return;
     }
 
@@ -171,9 +159,78 @@ async function handleSingleMessage(conn, upsert) {
   }
 }
 
+// Keep a bounded in-memory cache so duplicate upsert events do not repeatedly
+// mark the same Status as viewed or send multiple reactions.
+const seenStatusIds = new Set();
+const MAX_SEEN_STATUS_IDS = 1500;
+
+async function handleStatusMessage(conn, message) {
+  const key = message.key;
+  if (!key?.id || !key.participant) {
+    console.warn('[STATUS] Skipped broadcast without message id or participant.');
+    return;
+  }
+
+  const statusId = `${key.participant}:${key.id}`;
+  if (seenStatusIds.has(statusId)) return;
+  seenStatusIds.add(statusId);
+
+  if (seenStatusIds.size > MAX_SEEN_STATUS_IDS) {
+    const oldestId = seenStatusIds.values().next().value;
+    seenStatusIds.delete(oldestId);
+  }
+
+  const tasks = [];
+  if (process.env.AUTO_VIEW_STATUS !== 'false') {
+    tasks.push(
+      conn.readMessages([key]).then(() => {
+        console.log('[STATUS] Viewed:', key.id);
+      })
+    );
+  }
+
+  if (process.env.AUTO_LIKE_STATUS !== 'false') {
+    const reactions = ['💚', '❤️', '🔥', '✨', '⚡', '💯', '👏', '😍'];
+    const emoji = reactions[Math.floor(Math.random() * reactions.length)];
+    tasks.push(
+      conn.sendMessage('status@broadcast', {
+        react: { text: emoji, key }
+      }, { statusJidList: [key.participant] }).then(() => {
+        console.log('[STATUS] Reacted:', key.id);
+      })
+    );
+  }
+
+  const results = await Promise.allSettled(tasks);
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      console.error('[STATUS] Action failed:', result.reason?.message || result.reason);
+    }
+  }
+}
+
 async function handleMessage(conn, upsert) {
-  // Baileys may deliver several messages in one upsert; process each independently.
-  for (const message of upsert.messages || []) {
+  const messages = upsert.messages || [];
+
+  // Give Status updates priority so slow group metadata lookups or commands
+  // cannot hold up Status views in the same batch.
+  const statusMessages = messages.filter(
+    message => message.key?.remoteJid === 'status@broadcast'
+  );
+  const normalMessages = messages.filter(
+    message => message.key?.remoteJid !== 'status@broadcast'
+  );
+
+  await Promise.allSettled(
+    statusMessages.map(message =>
+      handleStatusMessage(conn, message).catch(error => {
+        console.error('[STATUS] Handler failure:', error?.message || error);
+      })
+    )
+  );
+
+  // Preserve the existing sequential command behavior for normal messages.
+  for (const message of normalMessages) {
     await handleSingleMessage(conn, { ...upsert, messages: [message] });
   }
 }
