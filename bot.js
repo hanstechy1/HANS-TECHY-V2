@@ -1,6 +1,6 @@
 /**
- * HANS TECHY V2 - Message Event Handler (English)
- * Coordinates commands, permissions, status monitoring, and anti-link
+ * HANS TECHY V2 - Message Event Handler
+ * Coordinates commands, permissions, status monitoring, and anti-link.
  */
 
 const { commands } = require('./command');
@@ -8,15 +8,15 @@ const { normalizeMessageContent } = require('@whiskeysockets/baileys');
 
 /**
  * Normalize WhatsApp wrapper messages before reading their content.
- * Baileys can wrap actual content in ephemeral, view-once, document-caption,
- * or edited-message containers.
  */
 function unwrapMessage(message) {
   let current = message;
+
   for (let i = 0; i < 8 && current; i += 1) {
     const normalized = typeof normalizeMessageContent === 'function'
       ? normalizeMessageContent(current)
       : current;
+
     if (normalized && normalized !== current) {
       current = normalized;
       continue;
@@ -34,26 +34,33 @@ function unwrapMessage(message) {
     if (!wrapper || wrapper === current) break;
     current = wrapper;
   }
+
   return current;
 }
 
+function getContextInfo(message) {
+  if (!message || typeof message !== 'object') return null;
+
+  for (const value of Object.values(message)) {
+    if (value?.contextInfo) return value.contextInfo;
+  }
+
+  return null;
+}
+
 /**
- * Handle incoming WhatsApp messages & status updates
- * @param {import('@whiskeysockets/baileys').WASocket} conn Baileys socket connection
- * @param {Object} upsert Upsert event payload
+ * Handle one incoming WhatsApp message or status update.
  */
 async function handleSingleMessage(conn, upsert) {
   try {
     if (!upsert.messages || !upsert.messages[0]) return;
-    const m = upsert.messages[0];
 
-    // Normalize wrapped message payloads before extracting text or captions.
+    const m = upsert.messages[0];
     m.message = unwrapMessage(m.message);
 
     const from = m.key?.remoteJid;
     if (!from) return;
 
-    // Environment & Bot Config
     const prefix = process.env.PREFIX || '.';
     const botName = process.env.BOT_NAME || 'HANS TECHY V2';
     const ownerName = process.env.OWNER_NAME || 'HANS TECHY';
@@ -62,25 +69,29 @@ async function handleSingleMessage(conn, upsert) {
     const autoViewStatus = process.env.AUTO_VIEW_STATUS !== 'false';
     const autoLikeStatus = process.env.AUTO_LIKE_STATUS !== 'false';
 
-    // 1. STATUS BROADCAST HANDLER
     if (from === 'status@broadcast') {
       if (autoViewStatus) {
         await conn.readMessages([m.key]).catch(() => null);
       }
+
       if (autoLikeStatus && m.key.id) {
         const reactions = ['💚', '❤️', '🔥', '✨', '⚡', '💯', '👏', '😍'];
         const randomEmoji = reactions[Math.floor(Math.random() * reactions.length)];
+
         await conn.sendMessage(from, {
           react: { text: randomEmoji, key: m.key }
-        }, { statusJidList: [m.key.participant] }).catch(() => null);
+        }, {
+          statusJidList: [m.key.participant]
+        }).catch(() => null);
       }
+
       return;
     }
 
     if (!m.message) return;
 
-    // 2. EXTRACT MESSAGE CONTENT
-    const body = m.message.conversation ||
+    const body =
+      m.message.conversation ||
       m.message.extendedTextMessage?.text ||
       m.message.imageMessage?.caption ||
       m.message.videoMessage?.caption ||
@@ -91,18 +102,28 @@ async function handleSingleMessage(conn, upsert) {
       m.message.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
       '';
 
+    const contextInfo = getContextInfo(m.message);
+    m.mentionedJid = contextInfo?.mentionedJid || [];
+    m.quoted = contextInfo?.quotedMessage
+      ? {
+          ...contextInfo,
+          sender: contextInfo.participant
+        }
+      : null;
+
     const isGroup = from.endsWith('@g.us');
     const sender = isGroup ? (m.key.participant || m.participant) : from;
     const senderNumber = sender ? sender.split('@')[0].replace(/[^0-9]/g, '') : '';
-    const isOwner = Boolean(m.key.fromMe || (rawOwnerNumber && senderNumber === rawOwnerNumber));
+    const isOwner = Boolean(
+      m.key.fromMe ||
+      (rawOwnerNumber && senderNumber === rawOwnerNumber)
+    );
     const pushName = m.pushName || 'User';
 
-    // Attach sender and from directly to m for easy access
     m.from = from;
     m.sender = sender;
     m.isGroup = isGroup;
 
-    // Group Metadata & Admins
     let groupMetadata = null;
     let groupAdmins = [];
     let isAdmin = false;
@@ -111,67 +132,94 @@ async function handleSingleMessage(conn, upsert) {
     if (isGroup) {
       try {
         groupMetadata = await conn.groupMetadata(from);
-        const botJid = conn.user?.id ? conn.user.id.split(':')[0] + '@s.whatsapp.net' : '';
+        const botJid = conn.user?.id
+          ? `${conn.user.id.split(':')[0]}@s.whatsapp.net`
+          : '';
+
         groupAdmins = groupMetadata.participants
-          .filter(p => p.admin === 'admin' || p.admin === 'superadmin')
-          .map(p => p.id);
+          .filter((participant) =>
+            participant.admin === 'admin' ||
+            participant.admin === 'superadmin'
+          )
+          .map((participant) => participant.id);
+
         isAdmin = groupAdmins.includes(sender);
         isBotAdmin = groupAdmins.includes(botJid);
       } catch {
-        // Fallback if groupMetadata fails
+        // Continue without group metadata if lookup fails.
       }
     }
 
-    // 3. ANTI-LINK DETECTION (FOR GROUPS)
     if (isGroup && body.includes('chat.whatsapp.com/')) {
       if (!isAdmin && !isOwner) {
         await conn.sendMessage(from, {
           text: `⚠️ @${senderNumber}, sharing external group links is strictly prohibited!`,
           mentions: [sender]
-        }, { quoted: m });
+        }, {
+          quoted: m
+        });
 
         if (isBotAdmin) {
-          await conn.sendMessage(from, { delete: m.key }).catch(() => null);
+          await conn.sendMessage(from, {
+            delete: m.key
+          }).catch(() => null);
         }
       }
     }
 
-    // 4. CHECK PREFIX & COMMAND PARSING
     const trimmedBody = String(body).trim();
     if (!trimmedBody.startsWith(prefix)) return;
 
-    const args = trimmedBody.slice(prefix.length).trim().split(/\\s+/);
+    const args = trimmedBody
+      .slice(prefix.length)
+      .trim()
+      .split(/\s+/);
+
     const cmdName = args.shift().toLowerCase();
     if (!cmdName) return;
 
-    // 5. MODE RESTRICTION
-    if (mode === 'private' && !isOwner) {
-      return;
-    }
+    if (mode === 'private' && !isOwner) return;
 
-    // 6. FIND MATCHING COMMAND
-    const cmd = commands.find(c => c.pattern === cmdName || (c.alias && c.alias.includes(cmdName)));
+    const cmd = commands.find((command) =>
+      command.pattern === cmdName ||
+      (command.alias && command.alias.includes(cmdName))
+    );
+
     if (!cmd) return;
 
-    // 7. PERMISSION VALIDATIONS
     if (cmd.onlyOwner && !isOwner) {
-      return await conn.sendMessage(from, { text: '❌ This command is restricted to the bot Owner only!' }, { quoted: m });
+      return await conn.sendMessage(from, {
+        text: '❌ This command is restricted to the bot Owner only!'
+      }, {
+        quoted: m
+      });
     }
 
     if (cmd.onlyGroup && !isGroup) {
-      return await conn.sendMessage(from, { text: '❌ This command can only be used in Groups!' }, { quoted: m });
+      return await conn.sendMessage(from, {
+        text: '❌ This command can only be used in Groups!'
+      }, {
+        quoted: m
+      });
     }
 
     if (cmd.onlyAdmin && !isAdmin && !isOwner) {
-      return await conn.sendMessage(from, { text: '❌ You must be a Group Admin to use this command!' }, { quoted: m });
+      return await conn.sendMessage(from, {
+        text: '❌ You must be a Group Admin to use this command!'
+      }, {
+        quoted: m
+      });
     }
 
-    // Reaction if command defines one
     if (cmd.react) {
-      await conn.sendMessage(from, { react: { text: cmd.react, key: m.key } }).catch(() => null);
+      await conn.sendMessage(from, {
+        react: {
+          text: cmd.react,
+          key: m.key
+        }
+      }).catch(() => null);
     }
 
-    // 8. EXECUTE COMMAND
     await cmd.function(conn, m, {
       args,
       prefix,
@@ -186,25 +234,31 @@ async function handleSingleMessage(conn, upsert) {
       pushName,
       groupMetadata
     });
-
   } catch (err) {
     console.error('Error in handleMessage:', err);
+
     try {
-      if (upsert.messages?.[0]?.key?.remoteJid) {
-        await conn.sendMessage(upsert.messages[0].key.remoteJid, {
+      const message = upsert.messages?.[0];
+
+      if (message?.key?.remoteJid) {
+        await conn.sendMessage(message.key.remoteJid, {
           text: '❌ Command failed. Please try again or contact the bot owner.'
-        }, { quoted: upsert.messages[0] }).catch(() => null);
+        }, {
+          quoted: message
+        }).catch(() => null);
       }
     } catch {
-      // Ignore secondary error
+      // Ignore secondary error.
     }
   }
 }
 
 async function handleMessage(conn, upsert) {
-  // Baileys may deliver several messages in one upsert; process each independently.
   for (const message of upsert.messages || []) {
-    await handleSingleMessage(conn, { ...upsert, messages: [message] });
+    await handleSingleMessage(conn, {
+      ...upsert,
+      messages: [message]
+    });
   }
 }
 
