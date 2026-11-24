@@ -1,265 +1,154 @@
-/**
- * HANS TECHY V2 - Message Event Handler
- * Coordinates commands, permissions, status monitoring, and anti-link.
- */
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  proto
+} = require('@whiskeysockets/baileys');
+const axios = require('axios');
+const NodeCache = require('node-cache');
+const pino = require('pino');
+const fs = require('fs-extra');
+const path = require('path');
+const config = require('./config');
+const { handleCommand } = require('./command');
 
-const { commands } = require('./command');
-const { normalizeMessageContent } = require('@whiskeysockets/baileys');
+const msgRetryCounterCache = new NodeCache({ stdTTL: 5 * 60, useClones: false });
+const messageStore = new NodeCache({ stdTTL: 15 * 60, useClones: false });
+const groupMetadataCache = new NodeCache({ stdTTL: 10 * 60, useClones: false });
 
-/**
- * Normalize WhatsApp wrapper messages before reading their content.
- */
-function unwrapMessage(message) {
-  let current = message;
+const botStatus = {
+  connected: false,
+  startTime: Date.now(),
+  user: null,
+  reconnectAttempts: 0
+};
 
-  for (let i = 0; i < 8 && current; i += 1) {
-    const normalized = typeof normalizeMessageContent === 'function'
-      ? normalizeMessageContent(current)
-      : current;
+async function downloadSessionCreds() {
+  const sessionDir = path.join(__dirname, 'session');
+  const credsPath = path.join(sessionDir, 'creds.json');
 
-    if (normalized && normalized !== current) {
-      current = normalized;
-      continue;
-    }
-
-    const wrapper =
-      current.ephemeralMessage?.message ||
-      current.viewOnceMessage?.message ||
-      current.viewOnceMessageV2?.message ||
-      current.viewOnceMessageV2Extension?.message ||
-      current.documentWithCaptionMessage?.message ||
-      current.editedMessage?.message ||
-      current.deviceSentMessage?.message;
-
-    if (!wrapper || wrapper === current) break;
-    current = wrapper;
+  if (fs.existsSync(credsPath)) {
+    return true;
   }
 
-  return current;
-}
-
-function getContextInfo(message) {
-  if (!message || typeof message !== 'object') return null;
-
-  for (const value of Object.values(message)) {
-    if (value?.contextInfo) return value.contextInfo;
+  const rawSession = (config.SESSION_ID || '').trim();
+  if (!rawSession) {
+    console.error('[HANS TECHY V2] ❌ SESSION_ID is missing from Heroku Config Vars.');
+    return false;
   }
 
-  return null;
-}
+  const sessionId32 = rawSession.replace(/^HANS\s*TECHY~/i, '').trim();
+  if (sessionId32.length !== 32) {
+    console.error('[HANS TECHY V2] ❌ Invalid SESSION_ID length. Must be 32 characters after HANS TECHY~');
+    return false;
+  }
 
-/**
- * Handle one incoming WhatsApp message or status update.
- */
-async function handleSingleMessage(conn, upsert) {
   try {
-    if (!upsert.messages || !upsert.messages[0]) return;
-
-    const m = upsert.messages[0];
-    m.message = unwrapMessage(m.message);
-
-    const from = m.key?.remoteJid;
-    if (!from) return;
-
-    const prefix = process.env.PREFIX || '.';
-    const botName = process.env.BOT_NAME || 'HANS TECHY V2';
-    const ownerName = process.env.OWNER_NAME || 'HANS TECHY';
-    const rawOwnerNumber = (process.env.OWNER_NUMBER || '').replace(/[^0-9]/g, '');
-    const mode = (process.env.MODE || 'public').toLowerCase();
-    const autoViewStatus = process.env.AUTO_VIEW_STATUS !== 'false';
-    const autoLikeStatus = process.env.AUTO_LIKE_STATUS !== 'false';
-
-    if (from === 'status@broadcast') {
-      if (autoViewStatus) {
-        await conn.readMessages([m.key]).catch(() => null);
-      }
-
-      if (autoLikeStatus && m.key.id) {
-        const reactions = ['💚', '❤️', '🔥', '✨', '⚡', '💯', '👏', '😍'];
-        const randomEmoji = reactions[Math.floor(Math.random() * reactions.length)];
-
-        await conn.sendMessage(from, {
-          react: { text: randomEmoji, key: m.key }
-        }, {
-          statusJidList: [m.key.participant]
-        }).catch(() => null);
-      }
-
-      return;
-    }
-
-    if (!m.message) return;
-
-    const body =
-      m.message.conversation ||
-      m.message.extendedTextMessage?.text ||
-      m.message.imageMessage?.caption ||
-      m.message.videoMessage?.caption ||
-      m.message.documentMessage?.caption ||
-      m.message.buttonsResponseMessage?.selectedButtonId ||
-      m.message.templateButtonReplyMessage?.selectedId ||
-      m.message.listResponseMessage?.singleSelectReply?.selectedRowId ||
-      m.message.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
-      '';
-
-    const contextInfo = getContextInfo(m.message);
-    m.mentionedJid = contextInfo?.mentionedJid || [];
-    m.quoted = contextInfo?.quotedMessage
-      ? {
-          ...contextInfo,
-          sender: contextInfo.participant
-        }
-      : null;
-
-    const isGroup = from.endsWith('@g.us');
-    const sender = isGroup ? (m.key.participant || m.participant) : from;
-    const senderNumber = sender ? sender.split('@')[0].replace(/[^0-9]/g, '') : '';
-    const isOwner = Boolean(
-      m.key.fromMe ||
-      (rawOwnerNumber && senderNumber === rawOwnerNumber)
-    );
-    const pushName = m.pushName || 'User';
-
-    m.from = from;
-    m.sender = sender;
-    m.isGroup = isGroup;
-
-    let groupMetadata = null;
-    let groupAdmins = [];
-    let isAdmin = false;
-    let isBotAdmin = false;
-
-    if (isGroup) {
-      try {
-        groupMetadata = await conn.groupMetadata(from);
-        const botJid = conn.user?.id
-          ? `${conn.user.id.split(':')[0]}@s.whatsapp.net`
-          : '';
-
-        groupAdmins = groupMetadata.participants
-          .filter((participant) =>
-            participant.admin === 'admin' ||
-            participant.admin === 'superadmin'
-          )
-          .map((participant) => participant.id);
-
-        isAdmin = groupAdmins.includes(sender);
-        isBotAdmin = groupAdmins.includes(botJid);
-      } catch {
-        // Continue without group metadata if lookup fails.
-      }
-    }
-
-    if (isGroup && body.includes('chat.whatsapp.com/')) {
-      if (!isAdmin && !isOwner) {
-        await conn.sendMessage(from, {
-          text: `⚠️ @${senderNumber}, sharing external group links is strictly prohibited!`,
-          mentions: [sender]
-        }, {
-          quoted: m
-        });
-
-        if (isBotAdmin) {
-          await conn.sendMessage(from, {
-            delete: m.key
-          }).catch(() => null);
-        }
-      }
-    }
-
-    const trimmedBody = String(body).trim();
-    if (!trimmedBody.startsWith(prefix)) return;
-
-    const args = trimmedBody
-      .slice(prefix.length)
-      .trim()
-      .split(/\s+/);
-
-    const cmdName = args.shift().toLowerCase();
-    if (!cmdName) return;
-
-    if (mode === 'private' && !isOwner) return;
-
-    const cmd = commands.find((command) =>
-      command.pattern === cmdName ||
-      (command.alias && command.alias.includes(cmdName))
-    );
-
-    if (!cmd) return;
-
-    if (cmd.onlyOwner && !isOwner) {
-      return await conn.sendMessage(from, {
-        text: '❌ This command is restricted to the bot Owner only!'
-      }, {
-        quoted: m
-      });
-    }
-
-    if (cmd.onlyGroup && !isGroup) {
-      return await conn.sendMessage(from, {
-        text: '❌ This command can only be used in Groups!'
-      }, {
-        quoted: m
-      });
-    }
-
-    if (cmd.onlyAdmin && !isAdmin && !isOwner) {
-      return await conn.sendMessage(from, {
-        text: '❌ You must be a Group Admin to use this command!'
-      }, {
-        quoted: m
-      });
-    }
-
-    if (cmd.react) {
-      await conn.sendMessage(from, {
-        react: {
-          text: cmd.react,
-          key: m.key
-        }
-      }).catch(() => null);
-    }
-
-    await cmd.function(conn, m, {
-      args,
-      prefix,
-      botName,
-      ownerName,
-      ownerNumber: rawOwnerNumber,
-      mode,
-      isGroup,
-      isAdmin,
-      isBotAdmin,
-      isOwner,
-      pushName,
-      groupMetadata
+    console.log('[HANS TECHY V2] 🔄 Fetching credentials from secure API...');
+    const response = await axios.get(`${config.API_URL}/session?id=${sessionId32}`, {
+      timeout: 15000
     });
+
+    if (response.data && response.data.noiseKey) {
+      await fs.ensureDir(sessionDir);
+      await fs.writeJson(credsPath, response.data, { spaces: 2 });
+      console.log('[HANS TECHY V2] ✅ Credentials loaded successfully.');
+      return true;
+    } else {
+      console.error('[HANS TECHY V2] ❌ Invalid credentials payload received.');
+      return false;
+    }
   } catch (err) {
-    console.error('Error in handleMessage:', err);
+    console.error('[HANS TECHY V2] ❌ Session fetch error:', err.response?.data?.error || err.message);
+    return false;
+  }
+}
 
-    try {
-      const message = upsert.messages?.[0];
+async function startBot() {
+  const sessionDir = path.join(__dirname, 'session');
+  const ready = await downloadSessionCreds();
 
-      if (message?.key?.remoteJid) {
-        await conn.sendMessage(message.key.remoteJid, {
-          text: '❌ Command failed. Please try again or contact the bot owner.'
-        }, {
-          quoted: message
-        }).catch(() => null);
+  if (!ready) {
+    console.error('[HANS TECHY V2] 🛑 Cannot launch WhatsApp socket without session.');
+    return;
+  }
+
+  const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+  const { version } = await fetchLatestBaileysVersion().catch(() => ({
+    version: [2, 3000, 1017531234]
+  }));
+
+  const sock = makeWASocket({
+    version,
+    logger: pino({ level: 'silent' }),
+    printQRInTerminal: false,
+    auth: state,
+    browser: ['HANS TECHY V2', 'Safari', '2.0.0'],
+    syncFullHistory: false,
+    msgRetryCounterCache,
+    getMessage: async (key) => {
+      if (key.id && messageStore.has(key.id)) {
+        return messageStore.get(key.id);
       }
-    } catch {
-      // Ignore secondary error.
+      return proto.Message.fromObject({});
     }
-  }
+  });
+
+  sock.ev.on('creds.update', saveCreds);
+
+  sock.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect } = update;
+
+    if (connection === 'open') {
+      botStatus.connected = true;
+      botStatus.reconnectAttempts = 0;
+      botStatus.user = sock.user ? sock.user.id.split(':')[0] : 'Unknown';
+      console.log(`[HANS TECHY V2] 🟢 Bot Online! Account: ${botStatus.user}`);
+
+      try {
+        const ownerJid = `${config.OWNER_NUMBER}@s.whatsapp.net`;
+        await sock.sendMessage(ownerJid, {
+          text: `╭─━─━「 *HANS TECHY V2* 」─━─━\n│ 🤖 *BOT STATUS:* ONLINE\n│ 👑 *Owner:* ${config.OWNER_NAME}\n│ ⚡ *Prefix:* ${config.PREFIX}\n╰─━─━─━─━─━─━─━─━─━─━─━─━─━`
+        });
+      } catch (_) {}
+    }
+
+    if (connection === 'close') {
+      botStatus.connected = false;
+      const code = lastDisconnect?.error?.output?.statusCode;
+      const shouldReconnect = code !== DisconnectReason.loggedOut;
+
+      console.log(`[HANS TECHY V2] 🔴 Connection closed (${code || 'unknown'}).`);
+
+      if (shouldReconnect) {
+        botStatus.reconnectAttempts += 1;
+        const delay = Math.min(botStatus.reconnectAttempts * 3000, 30000);
+        setTimeout(() => startBot(), delay);
+      } else {
+        console.error('[HANS TECHY V2] 🛑 Logged out. Session expired. Clearing cache.');
+        await fs.remove(sessionDir).catch(() => {});
+      }
+    }
+  });
+
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (type !== 'notify' || !messages || !messages.length) return;
+
+    for (const msg of messages) {
+      if (!msg.message) continue;
+      if (msg.key && msg.key.id) messageStore.set(msg.key.id, msg.message);
+      if (msg.key && msg.key.remoteJid === 'status@broadcast') continue;
+
+      try {
+        await handleCommand(sock, msg, { groupCache: groupMetadataCache, botStatus });
+      } catch (err) {
+        console.error('[HANS TECHY V2] Command error:', err.message);
+      }
+    }
+  });
+
+  return sock;
 }
 
-async function handleMessage(conn, upsert) {
-  for (const message of upsert.messages || []) {
-    await handleSingleMessage(conn, {
-      ...upsert,
-      messages: [message]
-    });
-  }
-}
-
-module.exports = { handleMessage };
+module.exports = { startBot, botStatus };
