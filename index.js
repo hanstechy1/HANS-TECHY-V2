@@ -196,17 +196,6 @@ async function startBot() {
           chalk.green(
             'HANS TECHY V2 connected successfully.'
           )
-        );
-
-        if (OWNER_NUMBER) {
-          await conn.sendMessage(
-            `${OWNER_NUMBER}@s.whatsapp.net`,
-            {
-              text:
-                `*${process.env.BOT_NAME || 'HANS TECHY V2'} IS ONLINE!* 🚀\n` +
-                `Prefix: ${process.env.PREFIX || '.'}\n` +
-                `Mode: ${(process.env.MODE || 'public').toUpperCase()}`
-            }
           ).catch(() => null);
         }
       }
