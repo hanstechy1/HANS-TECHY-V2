@@ -25,27 +25,66 @@ fs.mkdirSync(SESSION_DIR, { recursive: true, mode: 0o700 });
 
 function restoreSessionFromEnv() {
   const sessionId = (process.env.SESSION_ID || '').trim();
-  if (!sessionId || fs.existsSync(CREDS_PATH)) return;
+  if (!sessionId) return;
 
+  // Keep compatibility with the legacy "HANS TECHY~<base64>" format.
   const separator = sessionId.indexOf('~');
   const encoded = separator >= 0 ? sessionId.slice(separator + 1) : sessionId;
   if (!encoded || !/^[A-Za-z0-9_+/=-]+$/.test(encoded)) {
     throw new Error('SESSION_ID is not valid Base64 data.');
   }
 
-  let decoded;
+  let parsed;
   try {
-    decoded = Buffer.from(encoded, 'base64').toString('utf8');
-    const parsed = JSON.parse(decoded);
+    const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+    parsed = JSON.parse(decoded);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('Session credentials must be a JSON object.');
+      throw new Error('Session data must be a JSON object.');
     }
   } catch (error) {
-    throw new Error('SESSION_ID could not be decoded as valid Baileys JSON credentials: ' + error.message);
+    throw new Error('SESSION_ID could not be decoded as valid Baileys JSON: ' + error.message);
   }
 
-  fs.writeFileSync(CREDS_PATH, decoded, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-  console.log(chalk.green('Session credentials restored from SESSION_ID.'));
+  // Newer full backups contain a map of relative auth-file paths to file contents.
+  // Restore missing files only: never overwrite an existing local session.
+  if (typeof parsed['creds.json'] === 'string') {
+    let restored = 0;
+    for (const [relativeName, fileContents] of Object.entries(parsed)) {
+      if (typeof fileContents !== 'string') continue;
+      if (
+        !relativeName ||
+        path.isAbsolute(relativeName) ||
+        relativeName.split(/[\\/]+/).some((part) => !part || part === '.' || part === '..')
+      ) {
+        throw new Error('SESSION_ID contains an unsafe auth file path.');
+      }
+
+      const target = path.resolve(SESSION_DIR, relativeName);
+      const root = path.resolve(SESSION_DIR) + path.sep;
+      if (!target.startsWith(root)) {
+        throw new Error('SESSION_ID contains an auth file outside the session directory.');
+      }
+      if (fs.existsSync(target)) continue;
+
+      fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(target, fileContents, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+      restored += 1;
+    }
+    console.log(chalk.green('Session backup restored; added ' + restored + ' missing auth file(s).'));
+    return;
+  }
+
+  // Original legacy IDs encoded only creds.json. Keep accepting them unchanged.
+  if (!fs.existsSync(CREDS_PATH)) {
+    fs.writeFileSync(CREDS_PATH, JSON.stringify(parsed), {
+      encoding: 'utf8',
+      mode: 0o600,
+      flag: 'wx'
+    });
+    console.log(chalk.green('Legacy session credentials restored from SESSION_ID.'));
+  } else {
+    console.log(chalk.yellow('Existing local session found; legacy SESSION_ID was not allowed to overwrite it.'));
+  }
 }
 
 let activeSocket = null;
