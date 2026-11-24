@@ -91,7 +91,7 @@ async function startBot() {
         if (OWNER_NUMBER) {
           const ownerName = (process.env.OWNER_NAME || OWNER_NUMBER || 'Owner').trim();
           const botName = process.env.BOT_NAME || 'HANS TECHY V2';
-          const supportNumber = (process.env.SUPPORT_NUMBER || '255686005775').replace(/\\D/g, '');
+          const supportNumber = (process.env.SUPPORT_NUMBER || '255686005775').replace(/\D/g, '');
 
           const connectedMessage = [
             '╭─ *' + botName + '* ─╮',
@@ -102,7 +102,7 @@ async function startBot() {
             '│ Support: wa.me/' + supportNumber,
             ' | https://hanstechybot.vercel.app',
             '╰────────────────────╯'
-          ].join('\\n');
+          ].join('\n');
 
           await conn.sendMessage(OWNER_NUMBER + '@s.whatsapp.net', {
             text: connectedMessage
