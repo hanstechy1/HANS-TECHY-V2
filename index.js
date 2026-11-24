@@ -89,9 +89,26 @@ async function startBot() {
       if (connection === 'open') {
         console.log(chalk.green('HANS TECHY V2 connected successfully.'));
         if (OWNER_NUMBER) {
+          const ownerName = (process.env.OWNER_NAME || OWNER_NUMBER || 'Owner').trim();
+          const botName = process.env.BOT_NAME || 'HANS TECHY V2';
+          const supportNumber = (process.env.SUPPORT_NUMBER || '255686005775').replace(/\\D/g, '');
+
+          const connectedMessage = [
+            '╭─ *' + botName + '* ─╮',
+            '│ Hello ' + ownerName + ' 👋',
+            '│ BotStatus: Active 🟢',
+            '│ Connection: Fully Connected',
+            '│ Updates: Enabled 🔔',
+            '│ Support: wa.me/' + supportNumber,
+            ' | https://hanstechybot.vercel.app',
+            '╰────────────────────╯'
+          ].join('\\n');
+
           await conn.sendMessage(OWNER_NUMBER + '@s.whatsapp.net', {
-            text: `*${process.env.BOT_NAME || 'HANS TECHY V2'} IS ONLINE!* 🚀\nPrefix: ${process.env.PREFIX || '.'}\nMode: ${(process.env.MODE || 'public').toUpperCase()}`
-          }).catch(() => null);
+            text: connectedMessage
+          }).catch((error) => {
+            console.error('[OWNER DM] Could not send connection notice:', error.message);
+          });
         }
       }
 
