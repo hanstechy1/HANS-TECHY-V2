@@ -4,6 +4,38 @@
  */
 
 const { commands } = require('./command');
+const { normalizeMessageContent } = require('@whiskeysockets/baileys');
+
+/**
+ * Normalize WhatsApp wrapper messages before reading their content.
+ * Baileys can wrap actual content in ephemeral, view-once, document-caption,
+ * or edited-message containers.
+ */
+function unwrapMessage(message) {
+  let current = message;
+  for (let i = 0; i < 8 && current; i += 1) {
+    const normalized = typeof normalizeMessageContent === 'function'
+      ? normalizeMessageContent(current)
+      : current;
+    if (normalized && normalized !== current) {
+      current = normalized;
+      continue;
+    }
+
+    const wrapper =
+      current.ephemeralMessage?.message ||
+      current.viewOnceMessage?.message ||
+      current.viewOnceMessageV2?.message ||
+      current.viewOnceMessageV2Extension?.message ||
+      current.documentWithCaptionMessage?.message ||
+      current.editedMessage?.message ||
+      current.deviceSentMessage?.message;
+
+    if (!wrapper || wrapper === current) break;
+    current = wrapper;
+  }
+  return current;
+}
 
 /**
  * Handle incoming WhatsApp messages & status updates
@@ -15,15 +47,10 @@ async function handleSingleMessage(conn, upsert) {
     if (!upsert.messages || !upsert.messages[0]) return;
     const m = upsert.messages[0];
 
-    // If message is ephemeral or viewOnce, unwrap inner message
-    if (m.message?.ephemeralMessage) {
-      m.message = m.message.ephemeralMessage.message;
-    }
-    if (m.message?.viewOnceMessageV2) {
-      m.message = m.message.viewOnceMessageV2.message;
-    }
+    // Normalize wrapped message payloads before extracting text or captions.
+    m.message = unwrapMessage(m.message);
 
-    const from = m.key.remoteJid;
+    const from = m.key?.remoteJid;
     if (!from) return;
 
     // Environment & Bot Config
@@ -57,8 +84,11 @@ async function handleSingleMessage(conn, upsert) {
       m.message.extendedTextMessage?.text ||
       m.message.imageMessage?.caption ||
       m.message.videoMessage?.caption ||
+      m.message.documentMessage?.caption ||
       m.message.buttonsResponseMessage?.selectedButtonId ||
       m.message.templateButtonReplyMessage?.selectedId ||
+      m.message.listResponseMessage?.singleSelectReply?.selectedRowId ||
+      m.message.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
       '';
 
     const isGroup = from.endsWith('@g.us');
@@ -107,10 +137,10 @@ async function handleSingleMessage(conn, upsert) {
     }
 
     // 4. CHECK PREFIX & COMMAND PARSING
-    const trimmedBody = body.trim();
+    const trimmedBody = String(body).trim();
     if (!trimmedBody.startsWith(prefix)) return;
 
-    const args = trimmedBody.slice(prefix.length).trim().split(/\s+/);
+    const args = trimmedBody.slice(prefix.length).trim().split(/\\s+/);
     const cmdName = args.shift().toLowerCase();
     if (!cmdName) return;
 
@@ -179,4 +209,3 @@ async function handleMessage(conn, upsert) {
 }
 
 module.exports = { handleMessage };
-
